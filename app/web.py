@@ -194,7 +194,8 @@ def api_guest_save(vmid):
 def api_settings():
     body = request.get_json(force=True) or {}
     cfg = core.load_config()
-    for k in ("paused", "snapshot_prefix", "rollback_on_fail"):
+    for k in ("paused", "snapshot_prefix", "rollback_on_fail",
+              "default_keep", "default_max_age_days"):
         if k in body:
             cfg["settings"][k] = body[k]
     core.save_config(cfg)

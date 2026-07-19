@@ -5,7 +5,9 @@
     "verify_tls": false,
     "paused": false,
     "snapshot_prefix": "preupd",
-    "rollback_on_fail": false
+    "rollback_on_fail": false,
+    "default_keep": 3,
+    "default_max_age_days": 0
   },
   "auth": {
     "allowlist": ["root@pam"]
@@ -18,7 +20,9 @@
       "weekdays": [6],
       "security_patch": true,
       "app_update": "example-app",
-      "pre_snapshot": true
+      "pre_snapshot": true,
+      "keep": null,
+      "max_age_days": null
     }
   }
 }

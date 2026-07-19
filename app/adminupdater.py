@@ -22,6 +22,8 @@ GUEST_DEFAULTS = {
     "security_patch": True,      # OS patch upgrade (distro auto-detected on host)
     "app_update": None,          # None, or a recipe name present in host recipes dir
     "pre_snapshot": True,        # rollback snapshot before touching the guest
+    "keep": None,                # keep newest N preupd_ snapshots (0 = no count limit); None = inherit
+    "max_age_days": None,        # delete preupd_ older than N days (0 = off); None = inherit
 }
 
 # The ONLY actions the host executor accepts. Plans never carry raw commands.
@@ -33,6 +35,11 @@ _APP_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")  # recipe name safety
 def guest_settings(cfg, vmid):
     g = dict(GUEST_DEFAULTS)
     g.update(cfg.get("guests", {}).get(str(vmid), {}))
+    sett = cfg.get("settings", {})
+    if g.get("keep") is None:
+        g["keep"] = int(sett.get("default_keep", 3))
+    if g.get("max_age_days") is None:
+        g["max_age_days"] = int(sett.get("default_max_age_days", 0))
     return g
 
 
@@ -73,6 +80,8 @@ def compute_plan():
             "pre_snapshot": bool(g["pre_snapshot"]),
             "snapshot_prefix": sett["snapshot_prefix"],
             "rollback_on_fail": bool(sett["rollback_on_fail"]),
+            "keep": int(g["keep"]),
+            "max_age_days": int(g["max_age_days"]),
         })
     return jobs
 
@@ -86,12 +95,15 @@ def record_report(results):
         entry = state.get(vmid, {})
         entry["last_run"] = now
         last = {"status": r.get("status"), "snapshot": r.get("snapshot"),
-                "ts": r.get("ts"), "steps": r.get("steps", [])}
+                "ts": r.get("ts"), "steps": r.get("steps", []),
+                "pruned": r.get("pruned", [])}
         entry["last"] = last
         entry["history"] = ([last] + entry.get("history", []))[:20]
         state[vmid] = entry
         step_summary = ", ".join(f"{s.get('action')}:{s.get('status')}" for s in r.get("steps", []))
-        core.log(f"{vmid} -> {r.get('status')} snap={r.get('snapshot')} [{step_summary}]")
+        pruned = r.get("pruned", [])
+        prune_note = f" pruned={len(pruned)}" if pruned else ""
+        core.log(f"{vmid} -> {r.get('status')} snap={r.get('snapshot')} [{step_summary}]{prune_note}")
     core.save_state(state)
     return {"recorded": len(results)}
 

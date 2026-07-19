@@ -13,9 +13,11 @@ Runs as root (needs pct). stdlib only -- PVE ships python3.
 import configparser
 import json
 import os
+import re
 import ssl
 import subprocess
 import sys
+import time
 import urllib.request
 from datetime import datetime, timezone
 
@@ -108,6 +110,45 @@ def rollback(ctid, snap, timeout):
     return rc == 0
 
 
+def _snap_epoch(name):
+    m = re.search(r"_(\d{8})_(\d{6})$", name)
+    if not m:
+        return 0
+    try:
+        return datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S").timestamp()
+    except ValueError:
+        return 0
+
+
+def prune_snapshots(ctid, prefix, keep, max_age_days):
+    """Delete old managed snapshots. ONLY names matching ^<prefix>_\\d{8}_\\d{6}$
+    are ever touched (re-checked right before each delete), so manual snapshots
+    and autosnap's auto_* are physically incapable of matching. Time is read
+    from the name itself, so no date parsing of `pct listsnapshot` is needed."""
+    keep, max_age_days = int(keep or 0), int(max_age_days or 0)
+    if keep <= 0 and max_age_days <= 0:
+        return []
+    rx = re.compile(r"^" + re.escape(prefix) + r"_\d{8}_\d{6}$")
+    rc, out = run(["pct", "listsnapshot", str(ctid)], 60)
+    if rc != 0:
+        return []
+    names = sorted({t for t in re.findall(r"[A-Za-z0-9_]+", out) if rx.match(t)})
+    to_del = set()
+    if keep > 0 and len(names) > keep:
+        to_del |= set(names[:len(names) - keep])          # oldest beyond keep
+    if max_age_days > 0:
+        cutoff = time.time() - max_age_days * 86400
+        to_del |= {n for n in names if _snap_epoch(n) and _snap_epoch(n) < cutoff}
+    deleted = []
+    for n in sorted(to_del):
+        if not rx.match(n):        # belt-and-suspenders
+            continue
+        rc, _ = run(["pct", "delsnapshot", str(ctid), n], 120)
+        if rc == 0:
+            deleted.append(n)
+    return deleted
+
+
 def do_job(cfg, job):
     ctid = int(job["ctid"])
     # back-compat: accept a list "actions" or a single legacy "action"
@@ -129,6 +170,11 @@ def do_job(cfg, job):
             return {**res, "status": "error",
                     "steps": [{"action": "snapshot", "status": "error", "rc": -1,
                                "log": "snapshot nieudany: " + snaplog[-500:]}]}
+
+    # 1b) retention: prune old preupd_ snapshots (the fresh one is protected by
+    # keep>=1, or by age 0 when only max_age_days is set)
+    res["pruned"] = prune_snapshots(ctid, job.get("snapshot_prefix", "preupd"),
+                                    job.get("keep", 0), job.get("max_age_days", 0))
 
     # 2) detect the guest OS ONCE
     distro = detect_distro(ctid)

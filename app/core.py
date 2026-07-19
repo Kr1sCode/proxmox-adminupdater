@@ -33,6 +33,8 @@ DEFAULT_SETTINGS = {
     "paused": False,             # master switch: /plan returns nothing
     "snapshot_prefix": "preupd", # pre-update snapshot name prefix (host builds the name)
     "rollback_on_fail": False,   # host rolls back the pre-snapshot if a job fails
+    "default_keep": 3,           # retention: keep newest N preupd_ snapshots (0 = no count limit)
+    "default_max_age_days": 0,   # retention: delete preupd_ older than N days (0 = off)
 }
 DEFAULT_AUTH = {
     "allowlist": ["root@pam"],   # who may log in to the panel

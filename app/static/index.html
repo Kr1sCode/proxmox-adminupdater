@@ -4,25 +4,36 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>adminupdater</title>
 <style>
-  :root{color-scheme:light dark;--bd:#8884}
+  :root{color-scheme:light dark;--bd:#8884;--accent:#3b82f6}
   *{box-sizing:border-box}
-  body{font:15px/1.5 system-ui,sans-serif;margin:0;padding:1.2rem;max-width:1100px;margin:0 auto}
-  header{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1rem}
-  h1{font-size:1.3rem;margin:0} .sp{flex:1}
+  html,body{height:100%;margin:0}
+  body{font:15px/1.5 system-ui,sans-serif;display:flex;flex-direction:column;overflow:hidden}
+  header{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;padding:.9rem 1.2rem;border-bottom:1px solid var(--bd)}
+  h1{font-size:1.2rem;margin:0} .sp{flex:1}
   button{padding:.45rem .9rem;border:1px solid var(--bd);border-radius:8px;background:transparent;color:inherit;cursor:pointer;font:inherit}
-  button.primary{background:#3b82f6;border-color:#3b82f6;color:#fff;font-weight:600}
-  table{width:100%;border-collapse:collapse;margin-top:.5rem}
-  th,td{text-align:left;padding:.5rem .6rem;border-bottom:1px solid var(--bd);vertical-align:middle}
-  th{font-size:.8rem;text-transform:uppercase;letter-spacing:.03em;opacity:.7}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  nav{display:flex;gap:.3rem;padding:.5rem 1.2rem 0}
+  nav button{border-bottom:2px solid transparent;border-radius:8px 8px 0 0}
+  nav button.active{border-bottom-color:var(--accent);font-weight:600}
+  /* fixed-height content region with its OWN vertical scrollbar */
+  main{flex:1;min-height:0;padding:1rem 1.2rem;overflow:hidden;display:flex}
+  .pane{flex:1;min-height:0;display:none;flex-direction:column}
+  .pane.active{display:flex}
+  .scroll{flex:1;min-height:0;overflow-y:auto;border:1px solid var(--bd);border-radius:10px}
+  table{width:100%;border-collapse:collapse}
+  thead th{position:sticky;top:0;background:Canvas;z-index:1}
+  th,td{text-align:left;padding:.5rem .7rem;border-bottom:1px solid var(--bd);vertical-align:middle}
+  th{font-size:.78rem;text-transform:uppercase;letter-spacing:.03em;opacity:.7}
   .tag{font-size:.75rem;padding:.1rem .5rem;border-radius:99px;border:1px solid var(--bd)}
   .ok{color:#22c55e}.bad{color:#ef4444}.muted{opacity:.55}
-  .wrap{overflow-x:auto}
-  input[type=text],select{padding:.35rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;font:inherit}
-  input[type=text]{width:8rem}
-  dialog{border:1px solid var(--bd);border-radius:12px;padding:1.2rem;max-width:440px;width:92%;color:inherit;background:Canvas}
-  dialog label{display:block;margin:.7rem 0 .2rem;font-weight:600;font-size:.9rem}
+  pre#logbox{margin:0;padding:.8rem 1rem;font:12.5px/1.5 ui-monospace,monospace;white-space:pre-wrap;word-break:break-word}
+  dialog{border:1px solid var(--bd);border-radius:12px;padding:1.2rem;max-width:460px;width:92%;color:inherit;background:Canvas}
+  dialog label{display:block;margin:.6rem 0 .2rem;font-weight:600;font-size:.88rem}
   dialog .row{display:flex;gap:.5rem;align-items:center}
+  dialog .grid2{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
+  input[type=text],input[type=number],select{padding:.4rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;font:inherit;width:100%}
   .pause{color:#f59e0b}
+  .bar{display:flex;gap:.5rem;align-items:center;padding:0 0 .6rem}
 </style>
 </head>
 <body>
@@ -33,39 +44,76 @@
   <button id="pauseBtn"></button>
   <button id="logout">Wyloguj</button>
 </header>
-<div class="wrap">
-<table>
-  <thead><tr><th>CT</th><th>Nazwa</th><th>Status</th><th>Harmonogram</th><th>Zakres</th><th>Ostatnio</th><th></th></tr></thead>
-  <tbody id="rows"></tbody>
-</table>
-</div>
-<p class="muted" style="margin-top:1rem;font-size:.85rem">
-  Aktualizacje wykonuje executor na hoście PVE. Kontener tylko wyznacza plan — CT musi być też na whiteliście po stronie hosta (<code>allowed_ctids</code>).
-</p>
+
+<nav>
+  <button class="tab active" data-tab="guests">Kontenery</button>
+  <button class="tab" data-tab="log">Log</button>
+</nav>
+
+<main>
+  <!-- KONTENERY -->
+  <section class="pane active" id="pane-guests">
+    <div class="scroll">
+      <table>
+        <thead><tr><th>CT</th><th>Nazwa</th><th>Status</th><th>Harmonogram</th><th>Zakres</th><th>Retencja</th><th>Ostatnio</th><th></th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- LOG -->
+  <section class="pane" id="pane-log">
+    <div class="bar">
+      <button id="logRefresh">Odśwież</button>
+      <label class="row" style="gap:.35rem;font-size:.85rem"><input type="checkbox" id="logAuto" checked> auto (5&nbsp;s)</label>
+      <span class="sp"></span>
+      <span class="muted" id="logMeta"></span>
+    </div>
+    <div class="scroll"><pre id="logbox">…</pre></div>
+  </section>
+</main>
 
 <dialog id="dlg">
   <h3 style="margin:.2rem 0 0" id="dTitle"></h3>
   <div class="row" style="margin-top:.6rem"><input type="checkbox" id="dEnabled"><label style="margin:0">Włączony</label></div>
-  <label>Tryb</label>
+  <label>Tryb harmonogramu</label>
   <select id="dMode"><option value="calendar">Kalendarz (dni/godzina)</option><option value="interval">Interwał</option></select>
   <div id="calBox">
-    <label>Godzina (HH:MM)</label><input type="text" id="dTime" value="03:30">
-    <label>Dni tygodnia (0=Pn … 6=Nd, pusto=codziennie)</label><input type="text" id="dDays" value="6">
+    <div class="grid2">
+      <div><label>Godzina (HH:MM)</label><input type="text" id="dTime" value="03:30"></div>
+      <div><label>Dni (0=Pn…6=Nd, pusto=codz.)</label><input type="text" id="dDays" value="6"></div>
+    </div>
   </div>
-  <div id="intBox" style="display:none">
-    <label>Co ile minut</label><input type="text" id="dInterval" value="10080">
-  </div>
+  <div id="intBox" style="display:none"><label>Co ile minut</label><input type="number" id="dInterval" value="10080"></div>
+
   <div class="row" style="margin-top:.7rem"><input type="checkbox" id="dSec"><label style="margin:0">Patche bezpieczeństwa OS</label></div>
-  <label>Recepta aktualizacji aplikacji (nazwa pliku bez .sh; pusto = brak)</label><input type="text" id="dApp" style="width:100%">
+  <label>Recepta aktualizacji aplikacji (nazwa bez .sh; pusto = brak)</label><input type="text" id="dApp">
   <div class="row" style="margin-top:.7rem"><input type="checkbox" id="dSnap"><label style="margin:0">Snapshot przed aktualizacją</label></div>
+
+  <label style="margin-top:.7rem">Retencja migawek <span class="muted">(preupd_*)</span></label>
+  <div class="grid2">
+    <div><label style="font-weight:400">Trzymaj ostatnie (0 = bez limitu)</label><input type="number" id="dKeep" min="0" value="3"></div>
+    <div><label style="font-weight:400">Kasuj starsze niż (dni, 0 = off)</label><input type="number" id="dAge" min="0" value="0"></div>
+  </div>
+
   <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1.2rem">
     <button onclick="dlg.close()">Anuluj</button><button class="primary" id="dSave">Zapisz</button>
   </div>
 </dialog>
 
 <script>
-let SET={};
 const el=id=>document.getElementById(id);
+let SET={};
+
+// ---- tabs ----
+let logTimer=null;
+document.querySelectorAll('nav .tab').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav .tab').forEach(x=>x.classList.toggle('active',x===b));
+  document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('active',p.id==='pane-'+b.dataset.tab));
+  if(b.dataset.tab==='log'){loadLog();startLogAuto();} else stopLogAuto();
+});
+
+// ---- guests ----
 async function load(){
   const d=await (await fetch('/api/guests')).json();
   SET=d.settings;
@@ -74,15 +122,16 @@ async function load(){
   const rows=el('rows'); rows.innerHTML='';
   for(const g of d.guests){
     const c=g.config, r=g.report;
-    const sched=c.mode==='calendar'?`${(c.times||[]).join(',')} · dni ${(c.weekdays||[]).join(',')||'wszystkie'}`:`co ${c.interval_minutes} min`;
+    const sched=c.mode==='calendar'?`${(c.times||[]).join(',')} · dni ${(c.weekdays||[]).join(',')||'wsz.'}`:`co ${c.interval_minutes} min`;
     const scope=[c.security_patch?'patch':null,c.app_update?('app:'+c.app_update):null].filter(Boolean).join(' + ')||'—';
+    const ret=`${c.keep>0?('keep '+c.keep):'∞'}${c.max_age_days>0?(' · '+c.max_age_days+'d'):''}`;
     const last=r?`<span class="${r.status==='ok'?'ok':'bad'}">${r.status}</span> <span class="muted">${(r.ts||'').slice(0,16).replace('T',' ')}</span>`:'<span class="muted">—</span>';
     const tr=document.createElement('tr');
     tr.innerHTML=`<td>${g.vmid}</td><td>${g.name||''}</td>
       <td><span class="tag">${g.status}</span></td>
       <td>${c.enabled?sched:'<span class="muted">wyłączony</span>'}</td>
-      <td>${scope}</td><td>${last}</td>
-      <td><button data-v="${g.vmid}">Edytuj</button></td>`;
+      <td>${scope}</td><td>${ret}</td><td>${last}</td>
+      <td><button>Edytuj</button></td>`;
     tr.querySelector('button').onclick=()=>edit(g);
     rows.appendChild(tr);
   }
@@ -94,6 +143,7 @@ function edit(g){
   el('dTime').value=(c.times||['03:30'])[0]; el('dDays').value=(c.weekdays||[]).join(',');
   el('dInterval').value=c.interval_minutes; el('dSec').checked=c.security_patch;
   el('dApp').value=c.app_update||''; el('dSnap').checked=c.pre_snapshot;
+  el('dKeep').value=c.keep; el('dAge').value=c.max_age_days;
   toggleMode(); el('dSave').onclick=()=>save(g.vmid); el('dlg').showModal();
 }
 function toggleMode(){const cal=el('dMode').value==='calendar';el('calBox').style.display=cal?'':'none';el('intBox').style.display=cal?'none':''}
@@ -104,12 +154,28 @@ async function save(vmid){
     weekdays:el('dDays').value.split(',').map(x=>x.trim()).filter(x=>x!=='').map(Number),
     interval_minutes:+el('dInterval').value||10080,
     security_patch:el('dSec').checked,app_update:el('dApp').value.trim()||null,
-    pre_snapshot:el('dSnap').checked};
+    pre_snapshot:el('dSnap').checked,
+    keep:Math.max(0,+el('dKeep').value||0),max_age_days:Math.max(0,+el('dAge').value||0)};
   await fetch('/api/guests/'+vmid,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   el('dlg').close(); load();
 }
 el('pauseBtn').onclick=async()=>{await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({paused:!SET.paused})});load()};
 el('logout').onclick=async()=>{await fetch('/api/logout',{method:'POST'});location.href='/login'};
+
+// ---- log ----
+async function loadLog(){
+  const box=el('logbox'), sc=box.parentElement;
+  const atBottom=sc.scrollTop+sc.clientHeight>=sc.scrollHeight-30;
+  const d=await (await fetch('/api/log')).json();
+  box.textContent=d.log||'(pusto)';
+  el('logMeta').textContent='ostatnie 200 linii · '+new Date().toLocaleTimeString();
+  if(atBottom) sc.scrollTop=sc.scrollHeight;
+}
+function startLogAuto(){stopLogAuto();if(el('logAuto').checked)logTimer=setInterval(loadLog,5000)}
+function stopLogAuto(){if(logTimer){clearInterval(logTimer);logTimer=null}}
+el('logRefresh').onclick=loadLog;
+el('logAuto').onchange=()=>el('logAuto').checked?startLogAuto():stopLogAuto();
+
 load();
 </script>
 </body>
