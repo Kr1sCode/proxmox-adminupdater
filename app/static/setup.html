@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>adminupdater — konfiguracja</title>
+<style>
+  :root{color-scheme:light dark}
+  body{font:15px/1.5 system-ui,sans-serif;max-width:520px;margin:8vh auto;padding:0 1rem}
+  h1{font-size:1.4rem} label{display:block;margin:.8rem 0 .2rem;font-weight:600}
+  input{width:100%;padding:.55rem;border:1px solid #8884;border-radius:8px;background:transparent;color:inherit}
+  button{margin-top:1.2rem;padding:.6rem 1.1rem;border:0;border-radius:8px;background:#3b82f6;color:#fff;font-weight:600;cursor:pointer}
+  .err{color:#ef4444;margin-top:.8rem;min-height:1.2em}
+  .hint{opacity:.7;font-size:.85rem;margin-top:.3rem}
+</style>
+</head>
+<body>
+<h1>◆ adminupdater — pierwsza konfiguracja</h1>
+<p class="hint">Podaj adres API Proxmoksa i token (VM.Audit). Instalator zwykle wypełnia to automatycznie.</p>
+<label>Host PVE (IP)</label><input id="host" placeholder="172.19.19.1">
+<label>Port</label><input id="port" value="8006">
+<label>API token (user@realm!name=UUID)</label><input id="token" placeholder="adminupdater@pve!exec=...">
+<button id="go">Zapisz i połącz</button>
+<div class="err" id="err"></div>
+<script>
+fetch('/api/setup').then(r=>r.json()).then(d=>{if(d.pve_host)host.value=d.pve_host;if(d.pve_port)port.value=d.pve_port});
+go.onclick=async()=>{err.textContent='';
+  const r=await fetch('/api/setup',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({pve_host:host.value.trim(),pve_port:+port.value||8006,token:token.value.trim()})});
+  const d=await r.json(); if(r.ok)location.href='/login'; else err.textContent=d.error||'błąd';
+};
+</script>
+</body>
+</html>

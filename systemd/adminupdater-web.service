@@ -1,0 +1,13 @@
+[Unit]
+Description=adminupdater web UI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/opt/adminupdater
+ExecStart=/usr/bin/python3 -m gunicorn -w 2 -b 0.0.0.0:80 --timeout 120 web:app
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

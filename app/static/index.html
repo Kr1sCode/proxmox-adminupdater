@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>adminupdater</title>
+<style>
+  :root{color-scheme:light dark;--bd:#8884}
+  *{box-sizing:border-box}
+  body{font:15px/1.5 system-ui,sans-serif;margin:0;padding:1.2rem;max-width:1100px;margin:0 auto}
+  header{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1rem}
+  h1{font-size:1.3rem;margin:0} .sp{flex:1}
+  button{padding:.45rem .9rem;border:1px solid var(--bd);border-radius:8px;background:transparent;color:inherit;cursor:pointer;font:inherit}
+  button.primary{background:#3b82f6;border-color:#3b82f6;color:#fff;font-weight:600}
+  table{width:100%;border-collapse:collapse;margin-top:.5rem}
+  th,td{text-align:left;padding:.5rem .6rem;border-bottom:1px solid var(--bd);vertical-align:middle}
+  th{font-size:.8rem;text-transform:uppercase;letter-spacing:.03em;opacity:.7}
+  .tag{font-size:.75rem;padding:.1rem .5rem;border-radius:99px;border:1px solid var(--bd)}
+  .ok{color:#22c55e}.bad{color:#ef4444}.muted{opacity:.55}
+  .wrap{overflow-x:auto}
+  input[type=text],select{padding:.35rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;font:inherit}
+  input[type=text]{width:8rem}
+  dialog{border:1px solid var(--bd);border-radius:12px;padding:1.2rem;max-width:440px;width:92%;color:inherit;background:Canvas}
+  dialog label{display:block;margin:.7rem 0 .2rem;font-weight:600;font-size:.9rem}
+  dialog .row{display:flex;gap:.5rem;align-items:center}
+  .pause{color:#f59e0b}
+</style>
+</head>
+<body>
+<header>
+  <h1>◆ adminupdater</h1>
+  <span id="pausetag"></span>
+  <span class="sp"></span>
+  <button id="pauseBtn"></button>
+  <button id="logout">Wyloguj</button>
+</header>
+<div class="wrap">
+<table>
+  <thead><tr><th>CT</th><th>Nazwa</th><th>Status</th><th>Harmonogram</th><th>Zakres</th><th>Ostatnio</th><th></th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+</div>
+<p class="muted" style="margin-top:1rem;font-size:.85rem">
+  Aktualizacje wykonuje executor na hoście PVE. Kontener tylko wyznacza plan — CT musi być też na whiteliście po stronie hosta (<code>allowed_ctids</code>).
+</p>
+
+<dialog id="dlg">
+  <h3 style="margin:.2rem 0 0" id="dTitle"></h3>
+  <div class="row" style="margin-top:.6rem"><input type="checkbox" id="dEnabled"><label style="margin:0">Włączony</label></div>
+  <label>Tryb</label>
+  <select id="dMode"><option value="calendar">Kalendarz (dni/godzina)</option><option value="interval">Interwał</option></select>
+  <div id="calBox">
+    <label>Godzina (HH:MM)</label><input type="text" id="dTime" value="03:30">
+    <label>Dni tygodnia (0=Pn … 6=Nd, pusto=codziennie)</label><input type="text" id="dDays" value="6">
+  </div>
+  <div id="intBox" style="display:none">
+    <label>Co ile minut</label><input type="text" id="dInterval" value="10080">
+  </div>
+  <div class="row" style="margin-top:.7rem"><input type="checkbox" id="dSec"><label style="margin:0">Patche bezpieczeństwa OS</label></div>
+  <label>Recepta aktualizacji aplikacji (nazwa pliku bez .sh; pusto = brak)</label><input type="text" id="dApp" style="width:100%">
+  <div class="row" style="margin-top:.7rem"><input type="checkbox" id="dSnap"><label style="margin:0">Snapshot przed aktualizacją</label></div>
+  <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1.2rem">
+    <button onclick="dlg.close()">Anuluj</button><button class="primary" id="dSave">Zapisz</button>
+  </div>
+</dialog>
+
+<script>
+let SET={};
+const el=id=>document.getElementById(id);
+async function load(){
+  const d=await (await fetch('/api/guests')).json();
+  SET=d.settings;
+  el('pauseBtn').textContent=SET.paused?'▶ Wznów':'⏸ Pauza globalna';
+  el('pausetag').innerHTML=SET.paused?'<span class="tag pause">PAUZA</span>':'';
+  const rows=el('rows'); rows.innerHTML='';
+  for(const g of d.guests){
+    const c=g.config, r=g.report;
+    const sched=c.mode==='calendar'?`${(c.times||[]).join(',')} · dni ${(c.weekdays||[]).join(',')||'wszystkie'}`:`co ${c.interval_minutes} min`;
+    const scope=[c.security_patch?'patch':null,c.app_update?('app:'+c.app_update):null].filter(Boolean).join(' + ')||'—';
+    const last=r?`<span class="${r.status==='ok'?'ok':'bad'}">${r.status}</span> <span class="muted">${(r.ts||'').slice(0,16).replace('T',' ')}</span>`:'<span class="muted">—</span>';
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${g.vmid}</td><td>${g.name||''}</td>
+      <td><span class="tag">${g.status}</span></td>
+      <td>${c.enabled?sched:'<span class="muted">wyłączony</span>'}</td>
+      <td>${scope}</td><td>${last}</td>
+      <td><button data-v="${g.vmid}">Edytuj</button></td>`;
+    tr.querySelector('button').onclick=()=>edit(g);
+    rows.appendChild(tr);
+  }
+}
+function edit(g){
+  const c=g.config;
+  el('dTitle').textContent=`CT ${g.vmid} — ${g.name||''}`;
+  el('dEnabled').checked=c.enabled; el('dMode').value=c.mode;
+  el('dTime').value=(c.times||['03:30'])[0]; el('dDays').value=(c.weekdays||[]).join(',');
+  el('dInterval').value=c.interval_minutes; el('dSec').checked=c.security_patch;
+  el('dApp').value=c.app_update||''; el('dSnap').checked=c.pre_snapshot;
+  toggleMode(); el('dSave').onclick=()=>save(g.vmid); el('dlg').showModal();
+}
+function toggleMode(){const cal=el('dMode').value==='calendar';el('calBox').style.display=cal?'':'none';el('intBox').style.display=cal?'none':''}
+el('dMode').onchange=toggleMode;
+async function save(vmid){
+  const body={enabled:el('dEnabled').checked,mode:el('dMode').value,
+    times:[el('dTime').value.trim()],
+    weekdays:el('dDays').value.split(',').map(x=>x.trim()).filter(x=>x!=='').map(Number),
+    interval_minutes:+el('dInterval').value||10080,
+    security_patch:el('dSec').checked,app_update:el('dApp').value.trim()||null,
+    pre_snapshot:el('dSnap').checked};
+  await fetch('/api/guests/'+vmid,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  el('dlg').close(); load();
+}
+el('pauseBtn').onclick=async()=>{await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({paused:!SET.paused})});load()};
+el('logout').onclick=async()=>{await fetch('/api/logout',{method:'POST'});location.href='/login'};
+load();
+</script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+{
+  "settings": {
+    "pve_host": "CHANGE_ME",
+    "pve_port": 8006,
+    "verify_tls": false,
+    "paused": false,
+    "snapshot_prefix": "preupd",
+    "rollback_on_fail": false
+  },
+  "auth": {
+    "allowlist": ["root@pam"]
+  },
+  "guests": {
+    "105": {
+      "enabled": true,
+      "mode": "calendar",
+      "times": ["03:30"],
+      "weekdays": [6],
+      "security_patch": true,
+      "app_update": "example-app",
+      "pre_snapshot": true
+    }
+  }
+}

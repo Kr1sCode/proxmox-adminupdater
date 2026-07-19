@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>adminupdater — logowanie</title>
+<style>
+  :root{color-scheme:light dark}
+  body{font:15px/1.5 system-ui,sans-serif;max-width:400px;margin:12vh auto;padding:0 1rem}
+  h1{font-size:1.3rem} label{display:block;margin:.8rem 0 .2rem;font-weight:600}
+  input{width:100%;padding:.55rem;border:1px solid #8884;border-radius:8px;background:transparent;color:inherit}
+  button{margin-top:1.2rem;padding:.6rem 1.1rem;border:0;border-radius:8px;background:#3b82f6;color:#fff;font-weight:600;cursor:pointer;width:100%}
+  .err{color:#ef4444;margin-top:.8rem;min-height:1.2em}
+  .hint{opacity:.7;font-size:.85rem}
+</style>
+</head>
+<body>
+<h1>◆ adminupdater</h1>
+<p class="hint">Zaloguj się poświadczeniami Proxmoksa (domyślnie root@pam).</p>
+<label>Użytkownik</label><input id="u" value="root@pam" autocomplete="username">
+<label>Hasło</label><input id="p" type="password" autocomplete="current-password">
+<button id="go">Zaloguj</button>
+<div class="err" id="err"></div>
+<script>
+p.onkeydown=e=>{if(e.key==='Enter')go.click()};
+go.onclick=async()=>{err.textContent='';
+  const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({username:u.value.trim(),password:p.value})});
+  const d=await r.json(); if(r.ok)location.href='/'; else err.textContent=d.error||'błąd';
+};
+</script>
+</body>
+</html>

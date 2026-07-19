@@ -1,0 +1,17 @@
+[main]
+# URL of the adminupdater LXC (the container running the web UI). Plain :80 on
+# the LAN is fine; the executor authenticates with the bearer token below.
+updater_url    = http://CHANGE_ME_CT_IP
+
+# Shared bearer secret. MUST match /etc/adminupdater/exec_token inside the LXC.
+token          = CHANGE_ME
+
+# HOST-authoritative whitelist -- the real safety boundary. A ctid absent here
+# is refused even if the LXC lists it. Opt-in only; start empty.
+allowed_ctids  =
+
+# Host-trusted app update recipes (the LXC supplies only the recipe name).
+recipes_dir    = /etc/proxmox-adminupdater/recipes
+
+exec_timeout   = 1800
+tls_insecure   = false

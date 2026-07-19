@@ -1,0 +1,11 @@
+[Unit]
+Description=proxmox-adminupdater executor (pull plan from LXC, pct exec, report)
+After=network-online.target pve-cluster.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/proxmox-adminupdater-exec.py
+Nice=10
+IOSchedulingClass=idle
+# oneshot + timer: systemd won't start a second run while one is in progress.

@@ -1,0 +1,102 @@
+# proxmox-adminupdater
+
+**Agentless, scheduled updates for your Proxmox LXC fleet — no SSH into the guests, no agent inside them.**
+
+Applies **OS security patches** and runs **per-app update recipes** inside your
+containers on a schedule, with a **pre-update snapshot** for one-click rollback —
+all driven from a clean web UI. Think of it as scheduled `apt upgrade` + the
+community-scripts "update" step, fleet-wide, without touching each guest by hand.
+
+Sibling project to [`proxmox-autosnap`](https://github.com/Kr1sCode/proxmox-autosnap);
+it reuses the same config/schedule/UI lineage.
+
+## Why the split brain (and why there IS a host component)
+
+Proxmox exposes **no REST API to run a command inside an LXC** — the guest-agent
+`exec` exists only for QEMU VMs. So with **no SSH and no in-guest agent**, the
+*only* way into a container is `pct exec` / `pct snapshot`, which are **host-side**.
+
+adminupdater embraces that honestly and splits into two pieces:
+
+| Component | Where | Role |
+|---|---|---|
+| **Brain** | unprivileged Debian 13 **LXC** | web UI, per-guest schedule, computes the plan, stores reports. Talks to PVE read-only (`VM.Audit`). |
+| **Executor** | **PVE host** (~1 script + timer) | pulls the plan, `pct snapshot` + `pct exec` per job, posts results back. Stateless and dumb. |
+
+Unlike autosnap, this **does** leave a small footprint on the host — that is
+unavoidable for agentless in-guest execution. It is a single script + timer, so
+it survives PVE upgrades.
+
+## Security model
+
+- **Host-authoritative whitelist.** A guest is touched only if its CTID is in
+  `allowed_ctids` in `/etc/proxmox-adminupdater/host.conf` on the host. The LXC
+  can *request*, never *force*. Starts **empty** — opt-in per container.
+- **No raw commands cross the wire.** The plan carries only an **action enum**
+  (`security-patch` / `app-update`) + CTID + recipe *name*. The host builds the
+  actual command itself, so a compromised LXC cannot inject `rm -rf` — at worst
+  it asks for a patch on a guest the host already permits. Never host root.
+- **App recipes are host-trusted.** Update scripts live on the host
+  (`/etc/proxmox-adminupdater/recipes/<name>.sh`) and are `pct push`ed into the
+  guest at run time; the LXC only supplies the name.
+- **Bearer-authed plan/report**, shared secret between LXC and host.
+- **Pre-update snapshot** + optional **rollback on failure**.
+
+## Install
+
+Run on a Proxmox VE host:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/Kr1sCode/proxmox-adminupdater/main/install.sh)"
+```
+
+It creates the LXC, provisions a read-only API token, installs the brain, and
+drops the host executor + timer. Then:
+
+1. Open `http://<container-ip>/`, log in with your Proxmox credentials.
+2. Per guest: enable, pick a schedule, choose **security patches** and/or an
+   **app recipe**, keep **pre-snapshot** on.
+3. On the host, add each opted-in CTID to `allowed_ctids` in
+   `/etc/proxmox-adminupdater/host.conf`, then
+   `systemctl restart proxmox-adminupdater.timer`.
+
+## How a run works
+
+```
+host timer (every ~15 min)
+  → GET  http://<ct>/plan     (Bearer)  → LXC returns jobs due now (live is_due)
+  → per job:  pct snapshot → pct exec (apt/apk/pacman or recipe) → capture rc
+  → POST http://<ct>/report   (Bearer)  → LXC stores last_run + history
+```
+
+The host timer is the only clock; a reported run sets `last_run`, so it stops
+being due — idempotent. Distro (Debian/Ubuntu/Alpine/Arch) is auto-detected.
+
+## App recipes
+
+Drop `<name>.sh` in `/etc/proxmox-adminupdater/recipes/` on the host and set the
+guest's app recipe to `<name>` in the panel. For community-scripts containers the
+recipe is usually just `update` (their in-guest helper). See
+`host/recipes/example-app.sh`.
+
+## Uninstall
+
+```bash
+bash uninstall.sh <CTID>
+```
+
+Removes the container, host executor/timer, and API token. Pre-update snapshots
+in guests are left untouched.
+
+## Layout
+
+```
+app/       core.py · adminupdater.py · web.py · static/     (runs in the LXC)
+host/      executor · systemd unit + timer · recipes/       (runs on the PVE host)
+systemd/   adminupdater-web.service                         (LXC)
+install.sh · uninstall.sh · config/config.example.json
+```
+
+## License
+
+MIT — see [LICENSE](LICENSE).
