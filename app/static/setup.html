@@ -1,32 +1,55 @@
 <!doctype html>
-<html lang="pl">
+<html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>adminupdater — konfiguracja</title>
+<title>adminupdater — setup</title>
 <style>
-  :root{color-scheme:light dark}
-  body{font:15px/1.5 system-ui,sans-serif;max-width:520px;margin:8vh auto;padding:0 1rem}
+  :root{color-scheme:light;--bg:#f8fafc;--fg:#1e293b;--bd:#e2e8f0;--accent:#3b82f6}
+  html[data-theme="dark"]{color-scheme:dark;--bg:#0f172a;--fg:#e2e8f0;--bd:#334155}
+  html,body{height:100%;margin:0}
+  body{font:15px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--fg)}
+  .toggles{position:fixed;top:12px;right:14px;display:flex;gap:.4rem}
+  .toggles button{padding:.35rem .55rem;border:1px solid var(--bd);border-radius:8px;background:transparent;color:inherit;cursor:pointer;font:inherit}
+  .box{max-width:520px;margin:8vh auto;padding:0 1rem}
   h1{font-size:1.4rem} label{display:block;margin:.8rem 0 .2rem;font-weight:600}
-  input{width:100%;padding:.55rem;border:1px solid #8884;border-radius:8px;background:transparent;color:inherit}
-  button{margin-top:1.2rem;padding:.6rem 1.1rem;border:0;border-radius:8px;background:#3b82f6;color:#fff;font-weight:600;cursor:pointer}
+  input{width:100%;padding:.55rem;border:1px solid var(--bd);border-radius:8px;background:transparent;color:inherit}
+  button.go{margin-top:1.2rem;padding:.6rem 1.1rem;border:0;border-radius:8px;background:var(--accent);color:#fff;font-weight:600;cursor:pointer}
   .err{color:#ef4444;margin-top:.8rem;min-height:1.2em}
   .hint{opacity:.7;font-size:.85rem;margin-top:.3rem}
 </style>
 </head>
 <body>
-<h1>◆ adminupdater — pierwsza konfiguracja</h1>
-<p class="hint">Podaj adres API Proxmoksa i token (VM.Audit). Instalator zwykle wypełnia to automatycznie.</p>
-<label>Host PVE (IP)</label><input id="host" placeholder="172.19.19.1">
-<label>Port</label><input id="port" value="8006">
-<label>API token (user@realm!name=UUID)</label><input id="token" placeholder="adminupdater@pve!exec=...">
-<button id="go">Zapisz i połącz</button>
-<div class="err" id="err"></div>
+<div class="toggles">
+  <button id="langBtn">🌐 EN</button>
+  <button id="themeBtn">🌙</button>
+</div>
+<div class="box">
+  <h1 id="h1">◆ adminupdater — first-time setup</h1>
+  <p class="hint" id="hint">Enter the Proxmox API address and a token (VM.Audit). The installer usually fills this in automatically.</p>
+  <label id="lHost">PVE host (IP)</label><input id="host" placeholder="172.19.19.1">
+  <label id="lPort">Port</label><input id="port" value="8006">
+  <label id="lToken">API token (user@realm!name=UUID)</label><input id="token" placeholder="adminupdater@pve!exec=...">
+  <button class="go" id="go">Save & connect</button>
+  <div class="err" id="err"></div>
+</div>
 <script>
+const I18N={
+  en:{h1:'◆ adminupdater — first-time setup',hint:'Enter the Proxmox API address and a token (VM.Audit). The installer usually fills this in automatically.',host:'PVE host (IP)',port:'Port',token:'API token (user@realm!name=UUID)',go:'Save & connect'},
+  pl:{h1:'◆ adminupdater — pierwsza konfiguracja',hint:'Podaj adres API Proxmoksa i token (VM.Audit). Instalator zwykle wypełnia to automatycznie.',host:'Host PVE (IP)',port:'Port',token:'API token (user@realm!nazwa=UUID)',go:'Zapisz i połącz'}};
+let LANG=localStorage.getItem('au_lang')||'en';
+function applyLang(l){LANG=l;localStorage.setItem('au_lang',l);document.documentElement.lang=l;
+  langBtn.textContent='🌐 '+l.toUpperCase();const d=I18N[l];
+  h1.textContent=d.h1;hint.textContent=d.hint;lHost.textContent=d.host;lPort.textContent=d.port;lToken.textContent=d.token;go.textContent=d.go;}
+langBtn.onclick=()=>applyLang(LANG==='en'?'pl':'en');
+function applyTheme(th){document.documentElement.setAttribute('data-theme',th);localStorage.setItem('au_theme',th);themeBtn.textContent=th==='dark'?'☀️':'🌙';}
+themeBtn.onclick=()=>applyTheme(document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark');
+applyTheme(localStorage.getItem('au_theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'));
+applyLang(LANG);
 fetch('/api/setup').then(r=>r.json()).then(d=>{if(d.pve_host)host.value=d.pve_host;if(d.pve_port)port.value=d.pve_port});
 go.onclick=async()=>{err.textContent='';
   const r=await fetch('/api/setup',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({pve_host:host.value.trim(),pve_port:+port.value||8006,token:token.value.trim()})});
-  const d=await r.json(); if(r.ok)location.href='/login'; else err.textContent=d.error||'błąd';
+  const d=await r.json(); if(r.ok)location.href='/login'; else err.textContent=d.error||'error';
 };
 </script>
 </body>

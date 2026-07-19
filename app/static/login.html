@@ -1,31 +1,53 @@
 <!doctype html>
-<html lang="pl">
+<html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>adminupdater — logowanie</title>
+<title>adminupdater — login</title>
 <style>
-  :root{color-scheme:light dark}
-  body{font:15px/1.5 system-ui,sans-serif;max-width:400px;margin:12vh auto;padding:0 1rem}
+  :root{color-scheme:light;--bg:#f8fafc;--fg:#1e293b;--bd:#e2e8f0;--accent:#3b82f6}
+  html[data-theme="dark"]{color-scheme:dark;--bg:#0f172a;--fg:#e2e8f0;--bd:#334155}
+  html,body{height:100%;margin:0}
+  body{font:15px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--fg)}
+  .toggles{position:fixed;top:12px;right:14px;display:flex;gap:.4rem}
+  .toggles button{padding:.35rem .55rem;border:1px solid var(--bd);border-radius:8px;background:transparent;color:inherit;cursor:pointer;font:inherit}
+  .box{max-width:400px;margin:12vh auto;padding:0 1rem}
   h1{font-size:1.3rem} label{display:block;margin:.8rem 0 .2rem;font-weight:600}
-  input{width:100%;padding:.55rem;border:1px solid #8884;border-radius:8px;background:transparent;color:inherit}
-  button{margin-top:1.2rem;padding:.6rem 1.1rem;border:0;border-radius:8px;background:#3b82f6;color:#fff;font-weight:600;cursor:pointer;width:100%}
+  input{width:100%;padding:.55rem;border:1px solid var(--bd);border-radius:8px;background:transparent;color:inherit}
+  button.go{margin-top:1.2rem;padding:.6rem 1.1rem;border:0;border-radius:8px;background:var(--accent);color:#fff;font-weight:600;cursor:pointer;width:100%}
   .err{color:#ef4444;margin-top:.8rem;min-height:1.2em}
   .hint{opacity:.7;font-size:.85rem}
 </style>
 </head>
 <body>
-<h1>◆ adminupdater</h1>
-<p class="hint">Zaloguj się poświadczeniami Proxmoksa (domyślnie root@pam).</p>
-<label>Użytkownik</label><input id="u" value="root@pam" autocomplete="username">
-<label>Hasło</label><input id="p" type="password" autocomplete="current-password">
-<button id="go">Zaloguj</button>
-<div class="err" id="err"></div>
+<div class="toggles">
+  <button id="langBtn">🌐 EN</button>
+  <button id="themeBtn">🌙</button>
+</div>
+<div class="box">
+  <h1>◆ adminupdater</h1>
+  <p class="hint" id="hint">Log in with your Proxmox credentials (default root@pam).</p>
+  <label id="lUser">User</label><input id="u" value="root@pam" autocomplete="username">
+  <label id="lPass">Password</label><input id="p" type="password" autocomplete="current-password">
+  <button class="go" id="go">Log in</button>
+  <div class="err" id="err"></div>
+</div>
 <script>
+const I18N={en:{title:'Log in with your Proxmox credentials (default root@pam).',user:'User',pass:'Password',go:'Log in'},
+  pl:{title:'Zaloguj się poświadczeniami Proxmoksa (domyślnie root@pam).',user:'Użytkownik',pass:'Hasło',go:'Zaloguj'}};
+let LANG=localStorage.getItem('au_lang')||'en';
+function applyLang(l){LANG=l;localStorage.setItem('au_lang',l);document.documentElement.lang=l;
+  langBtn.textContent='🌐 '+l.toUpperCase();hint.textContent=I18N[l].title;lUser.textContent=I18N[l].user;
+  lPass.textContent=I18N[l].pass;go.textContent=I18N[l].go;}
+langBtn.onclick=()=>applyLang(LANG==='en'?'pl':'en');
+function applyTheme(th){document.documentElement.setAttribute('data-theme',th);localStorage.setItem('au_theme',th);themeBtn.textContent=th==='dark'?'☀️':'🌙';}
+themeBtn.onclick=()=>applyTheme(document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark');
+applyTheme(localStorage.getItem('au_theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'));
+applyLang(LANG);
 p.onkeydown=e=>{if(e.key==='Enter')go.click()};
 go.onclick=async()=>{err.textContent='';
   const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({username:u.value.trim(),password:p.value})});
-  const d=await r.json(); if(r.ok)location.href='/'; else err.textContent=d.error||'błąd';
+  const d=await r.json(); if(r.ok)location.href='/'; else err.textContent=d.error||'error';
 };
 </script>
 </body>

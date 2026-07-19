@@ -1,33 +1,34 @@
 <!doctype html>
-<html lang="pl">
+<html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>adminupdater</title>
 <style>
-  :root{color-scheme:light dark;--bd:#8884;--accent:#3b82f6}
+  :root{color-scheme:light;--bg:#f8fafc;--fg:#1e293b;--bd:#e2e8f0;--muted:#64748b;--card:#ffffff;--head:#ffffff;--accent:#3b82f6}
+  html[data-theme="dark"]{color-scheme:dark;--bg:#0f172a;--fg:#e2e8f0;--bd:#334155;--muted:#94a3b8;--card:#1e293b;--head:#0f172a}
   *{box-sizing:border-box}
   html,body{height:100%;margin:0}
-  body{font:15px/1.5 system-ui,sans-serif;display:flex;flex-direction:column;overflow:hidden}
-  header{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;padding:.9rem 1.2rem;border-bottom:1px solid var(--bd)}
+  body{font:15px/1.5 system-ui,sans-serif;display:flex;flex-direction:column;overflow:hidden;background:var(--bg);color:var(--fg)}
+  header{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;padding:.9rem 1.2rem;border-bottom:1px solid var(--bd)}
   h1{font-size:1.2rem;margin:0} .sp{flex:1}
   button{padding:.45rem .9rem;border:1px solid var(--bd);border-radius:8px;background:transparent;color:inherit;cursor:pointer;font:inherit}
   button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  button.icon{padding:.4rem .6rem}
   nav{display:flex;gap:.3rem;padding:.5rem 1.2rem 0}
   nav button{border-bottom:2px solid transparent;border-radius:8px 8px 0 0}
   nav button.active{border-bottom-color:var(--accent);font-weight:600}
-  /* fixed-height content region with its OWN vertical scrollbar */
   main{flex:1;min-height:0;padding:1rem 1.2rem;overflow:hidden;display:flex}
   .pane{flex:1;min-height:0;display:none;flex-direction:column}
   .pane.active{display:flex}
   .scroll{flex:1;min-height:0;overflow-y:auto;border:1px solid var(--bd);border-radius:10px}
   table{width:100%;border-collapse:collapse}
-  thead th{position:sticky;top:0;background:Canvas;z-index:1}
+  thead th{position:sticky;top:0;background:var(--head);z-index:1}
   th,td{text-align:left;padding:.5rem .7rem;border-bottom:1px solid var(--bd);vertical-align:middle}
-  th{font-size:.78rem;text-transform:uppercase;letter-spacing:.03em;opacity:.7}
+  th{font-size:.78rem;text-transform:uppercase;letter-spacing:.03em;color:var(--muted)}
   .tag{font-size:.75rem;padding:.1rem .5rem;border-radius:99px;border:1px solid var(--bd)}
-  .ok{color:#22c55e}.bad{color:#ef4444}.muted{opacity:.55}
+  .ok{color:#22c55e}.bad{color:#ef4444}.muted{color:var(--muted)}
   pre#logbox{margin:0;padding:.8rem 1rem;font:12.5px/1.5 ui-monospace,monospace;white-space:pre-wrap;word-break:break-word}
-  dialog{border:1px solid var(--bd);border-radius:12px;padding:1.2rem;max-width:460px;width:92%;max-height:88vh;overflow-y:auto;color:inherit;background:Canvas}
+  dialog{border:1px solid var(--bd);border-radius:12px;padding:1.2rem;max-width:460px;width:92%;max-height:88vh;overflow-y:auto;color:var(--fg);background:var(--card)}
   dialog hr{border:0;border-top:1px solid var(--bd);margin:1rem 0}
   dialog label{display:block;margin:.6rem 0 .2rem;font-weight:600;font-size:.88rem}
   dialog .row{display:flex;gap:.5rem;align-items:center}
@@ -42,31 +43,35 @@
   <h1>◆ adminupdater</h1>
   <span id="pausetag"></span>
   <span class="sp"></span>
+  <button class="icon" id="langBtn" title="Language">🌐 EN</button>
+  <button class="icon" id="themeBtn" title="Theme">🌙</button>
   <button id="pauseBtn"></button>
-  <button id="logout">Wyloguj</button>
+  <button id="logout" data-i18n="logout">Log out</button>
 </header>
 
 <nav>
-  <button class="tab active" data-tab="guests">Kontenery</button>
-  <button class="tab" data-tab="log">Log</button>
+  <button class="tab active" data-tab="guests" data-i18n="containers">Containers</button>
+  <button class="tab" data-tab="log" data-i18n="log">Log</button>
 </nav>
 
 <main>
-  <!-- KONTENERY -->
   <section class="pane active" id="pane-guests">
     <div class="scroll">
       <table>
-        <thead><tr><th>CT</th><th>Nazwa</th><th>Status</th><th>Harmonogram</th><th>Zakres</th><th>Retencja</th><th>Ostatnio</th><th></th></tr></thead>
+        <thead><tr>
+          <th data-i18n="thCT">CT</th><th data-i18n="thName">Name</th><th data-i18n="thStatus">Status</th>
+          <th data-i18n="thSchedule">Schedule</th><th data-i18n="thScope">Scope</th>
+          <th data-i18n="thRetention">Retention</th><th data-i18n="thLast">Last</th><th></th>
+        </tr></thead>
         <tbody id="rows"></tbody>
       </table>
     </div>
   </section>
 
-  <!-- LOG -->
   <section class="pane" id="pane-log">
     <div class="bar">
-      <button id="logRefresh">Odśwież</button>
-      <label class="row" style="gap:.35rem;font-size:.85rem"><input type="checkbox" id="logAuto" checked> auto (5&nbsp;s)</label>
+      <button id="logRefresh" data-i18n="refresh">Refresh</button>
+      <label class="row" style="gap:.35rem;font-size:.85rem"><input type="checkbox" id="logAuto" checked> <span data-i18n="autoLbl">auto (5&nbsp;s)</span></label>
       <span class="sp"></span>
       <span class="muted" id="logMeta"></span>
     </div>
@@ -76,61 +81,110 @@
 
 <dialog id="dlg">
   <h3 style="margin:.2rem 0 0" id="dTitle"></h3>
-  <div class="row" style="margin-top:.6rem"><input type="checkbox" id="dEnabled"><label style="margin:0">Włączony</label></div>
-  <label>Tryb harmonogramu</label>
-  <select id="dMode"><option value="calendar">Kalendarz (dni/godzina)</option><option value="interval">Interwał</option></select>
+  <div class="row" style="margin-top:.6rem"><input type="checkbox" id="dEnabled"><label style="margin:0" data-i18n="enabled">Enabled</label></div>
+  <label data-i18n="schedMode">Schedule mode</label>
+  <select id="dMode"><option value="calendar" data-i18n="calendar">Calendar (days/time)</option><option value="interval" data-i18n="interval">Interval</option></select>
   <div id="calBox">
     <div class="grid2">
-      <div><label>Godzina (HH:MM)</label><input type="text" id="dTime" value="03:30"></div>
-      <div><label>Dni (0=Pn…6=Nd, pusto=codz.)</label><input type="text" id="dDays" value="6"></div>
+      <div><label data-i18n="timeLbl">Time (HH:MM)</label><input type="text" id="dTime" value="03:30"></div>
+      <div><label data-i18n="daysLbl">Days (0=Mon…6=Sun, empty=daily)</label><input type="text" id="dDays" value="6"></div>
     </div>
   </div>
-  <div id="intBox" style="display:none"><label>Co ile minut</label><input type="number" id="dInterval" value="10080"></div>
+  <div id="intBox" style="display:none"><label data-i18n="everyMinLbl">Every N minutes</label><input type="number" id="dInterval" value="10080"></div>
 
-  <div class="row" style="margin-top:.7rem"><input type="checkbox" id="dSec"><label style="margin:0">Patche bezpieczeństwa OS</label></div>
-  <label>Recepta aktualizacji aplikacji (nazwa bez .sh; pusto = brak)</label><input type="text" id="dApp">
-  <div class="row" style="margin-top:.7rem"><input type="checkbox" id="dSnap"><label style="margin:0">Snapshot przed aktualizacją</label></div>
+  <div class="row" style="margin-top:.7rem"><input type="checkbox" id="dSec"><label style="margin:0" data-i18n="secPatch">OS security patches</label></div>
+  <label data-i18n="appRecipe">App update recipe (name without .sh; empty = none)</label><input type="text" id="dApp">
+  <div class="row" style="margin-top:.7rem"><input type="checkbox" id="dSnap"><label style="margin:0" data-i18n="snapBefore">Snapshot before update</label></div>
 
-  <label style="margin-top:.7rem">Retencja migawek <span class="muted">(preupd_*)</span></label>
+  <label style="margin-top:.7rem"><span data-i18n="retentionTitle">Snapshot retention</span> <span class="muted">(preupd_*)</span></label>
   <div class="grid2">
-    <div><label style="font-weight:400">Trzymaj ostatnie (0 = bez limitu)</label><input type="number" id="dKeep" min="0" value="3"></div>
-    <div><label style="font-weight:400">Kasuj starsze niż (dni, 0 = off)</label><input type="number" id="dAge" min="0" value="0"></div>
+    <div><label style="font-weight:400" data-i18n="keepLbl">Keep newest (0 = unlimited)</label><input type="number" id="dKeep" min="0" value="3"></div>
+    <div><label style="font-weight:400" data-i18n="ageLbl">Delete older than (days, 0 = off)</label><input type="number" id="dAge" min="0" value="0"></div>
   </div>
 
-  <label style="margin-top:.7rem">Health-check po aktualizacji <span class="muted">(porażka → rollback)</span></label>
+  <label style="margin-top:.7rem"><span data-i18n="healthTitle">Health-check after update</span> <span class="muted" data-i18n="healthHint">(failure → rollback)</span></label>
   <div class="grid2">
-    <select id="dHcType"><option value="none">— brak —</option><option value="systemd">systemd is-active</option><option value="http">HTTP curl -f</option></select>
-    <input type="text" id="dHcArg" placeholder="nginx  |  http://127.0.0.1/health">
+    <select id="dHcType"><option value="none" data-i18n="hcNone">— none —</option><option value="systemd">systemd is-active</option><option value="http">HTTP curl -f</option></select>
+    <input type="text" id="dHcArg" data-i18n-ph="hcArgPh" placeholder="nginx  |  http://127.0.0.1/health">
   </div>
 
   <hr>
-  <div class="row"><input type="checkbox" id="sEnabled"><label style="margin:0">📷 Harmonogram migawek <span class="muted">(niezależny od aktualizacji, prefix auto_)</span></label></div>
+  <div class="row"><input type="checkbox" id="sEnabled"><label style="margin:0">📷 <span data-i18n="snapSched">Snapshot schedule</span> <span class="muted" data-i18n="snapHint">(independent of updates, auto_ prefix)</span></label></div>
   <div id="snapBox">
-    <label>Tryb</label>
-    <select id="sMode"><option value="calendar">Kalendarz</option><option value="interval">Interwał</option></select>
+    <label data-i18n="mode">Mode</label>
+    <select id="sMode"><option value="calendar" data-i18n="calendarShort">Calendar</option><option value="interval" data-i18n="interval">Interval</option></select>
     <div id="sCal" class="grid2">
-      <div><label style="font-weight:400">Godzina (HH:MM)</label><input type="text" id="sTime" value="02:00"></div>
-      <div><label style="font-weight:400">Dni (pusto=codz.)</label><input type="text" id="sDays"></div>
+      <div><label style="font-weight:400" data-i18n="timeLbl">Time (HH:MM)</label><input type="text" id="sTime" value="02:00"></div>
+      <div><label style="font-weight:400" data-i18n="daysShort">Days (empty=daily)</label><input type="text" id="sDays"></div>
     </div>
-    <div id="sInt" style="display:none"><label style="font-weight:400">Co ile minut</label><input type="number" id="sInterval" value="1440"></div>
+    <div id="sInt" style="display:none"><label style="font-weight:400" data-i18n="everyMinLbl">Every N minutes</label><input type="number" id="sInterval" value="1440"></div>
     <div class="grid2">
-      <div><label style="font-weight:400">Prefix</label><input type="text" id="sPrefix" value="auto"></div>
-      <div><label style="font-weight:400">Trzymaj ostatnie</label><input type="number" id="sKeep" min="0" value="3"></div>
+      <div><label style="font-weight:400" data-i18n="prefix">Prefix</label><input type="text" id="sPrefix" value="auto"></div>
+      <div><label style="font-weight:400" data-i18n="keepShort">Keep newest</label><input type="number" id="sKeep" min="0" value="3"></div>
     </div>
     <div class="grid2">
-      <div><label style="font-weight:400">Kasuj starsze niż (dni)</label><input type="number" id="sAge" min="0" value="0"></div>
-      <div class="row" style="align-items:center;margin-top:1.6rem"><input type="checkbox" id="sDry"><label style="margin:0">Dry-run</label></div>
+      <div><label style="font-weight:400" data-i18n="ageShort">Delete older than (days)</label><input type="number" id="sAge" min="0" value="0"></div>
+      <div class="row" style="align-items:center;margin-top:1.6rem"><input type="checkbox" id="sDry"><label style="margin:0" data-i18n="dryrun">Dry-run</label></div>
     </div>
   </div>
 
   <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1.2rem">
-    <button onclick="dlg.close()">Anuluj</button><button class="primary" id="dSave">Zapisz</button>
+    <button onclick="dlg.close()" data-i18n="cancel">Cancel</button><button class="primary" id="dSave" data-i18n="save">Save</button>
   </div>
 </dialog>
 
 <script>
 const el=id=>document.getElementById(id);
 let SET={};
+
+// ---- i18n ----
+const I18N={
+  en:{containers:'Containers',log:'Log',logout:'Log out',pause:'⏸ Global pause',resume:'▶ Resume',pauseTag:'PAUSED',
+    thCT:'CT',thName:'Name',thStatus:'Status',thSchedule:'Schedule',thScope:'Scope',thRetention:'Retention',thLast:'Last',
+    edit:'Edit',disabled:'disabled',allDays:'all',daysWord:'days',
+    refresh:'Refresh',autoLbl:'auto (5 s)',logMeta:'last 200 lines',empty:'(empty)',
+    enabled:'Enabled',schedMode:'Schedule mode',calendar:'Calendar (days/time)',calendarShort:'Calendar',interval:'Interval',
+    timeLbl:'Time (HH:MM)',daysLbl:'Days (0=Mon…6=Sun, empty=daily)',daysShort:'Days (empty=daily)',everyMinLbl:'Every N minutes',
+    secPatch:'OS security patches',appRecipe:'App update recipe (name without .sh; empty = none)',
+    snapBefore:'Snapshot before update',retentionTitle:'Snapshot retention',
+    keepLbl:'Keep newest (0 = unlimited)',ageLbl:'Delete older than (days, 0 = off)',
+    healthTitle:'Health-check after update',healthHint:'(failure → rollback)',hcNone:'— none —',hcArgPh:'nginx  |  http://127.0.0.1/health',
+    snapSched:'Snapshot schedule',snapHint:'(independent of updates, auto_ prefix)',
+    mode:'Mode',prefix:'Prefix',keepShort:'Keep newest',ageShort:'Delete older than (days)',dryrun:'Dry-run',
+    cancel:'Cancel',save:'Save'},
+  pl:{containers:'Kontenery',log:'Log',logout:'Wyloguj',pause:'⏸ Pauza globalna',resume:'▶ Wznów',pauseTag:'PAUZA',
+    thCT:'CT',thName:'Nazwa',thStatus:'Status',thSchedule:'Harmonogram',thScope:'Zakres',thRetention:'Retencja',thLast:'Ostatnio',
+    edit:'Edytuj',disabled:'wyłączony',allDays:'wsz.',daysWord:'dni',
+    refresh:'Odśwież',autoLbl:'auto (5 s)',logMeta:'ostatnie 200 linii',empty:'(pusto)',
+    enabled:'Włączony',schedMode:'Tryb harmonogramu',calendar:'Kalendarz (dni/godzina)',calendarShort:'Kalendarz',interval:'Interwał',
+    timeLbl:'Godzina (HH:MM)',daysLbl:'Dni (0=Pn…6=Nd, pusto=codz.)',daysShort:'Dni (pusto=codz.)',everyMinLbl:'Co ile minut',
+    secPatch:'Patche bezpieczeństwa OS',appRecipe:'Recepta aktualizacji aplikacji (nazwa bez .sh; pusto = brak)',
+    snapBefore:'Snapshot przed aktualizacją',retentionTitle:'Retencja migawek',
+    keepLbl:'Trzymaj ostatnie (0 = bez limitu)',ageLbl:'Kasuj starsze niż (dni, 0 = off)',
+    healthTitle:'Health-check po aktualizacji',healthHint:'(porażka → rollback)',hcNone:'— brak —',hcArgPh:'nginx  |  http://127.0.0.1/health',
+    snapSched:'Harmonogram migawek',snapHint:'(niezależny od aktualizacji, prefix auto_)',
+    mode:'Tryb',prefix:'Prefix',keepShort:'Trzymaj ostatnie',ageShort:'Kasuj starsze niż (dni)',dryrun:'Dry-run',
+    cancel:'Anuluj',save:'Zapisz'}
+};
+let LANG=localStorage.getItem('au_lang')||'en';
+const t=k=>(I18N[LANG]&&I18N[LANG][k])||(I18N.en[k])||k;
+function applyLang(l){
+  LANG=l; localStorage.setItem('au_lang',l); document.documentElement.lang=l;
+  el('langBtn').textContent='🌐 '+l.toUpperCase();
+  document.querySelectorAll('[data-i18n]').forEach(n=>n.textContent=t(n.dataset.i18n));
+  document.querySelectorAll('[data-i18n-ph]').forEach(n=>n.placeholder=t(n.dataset.i18nPh));
+  load();
+}
+el('langBtn').onclick=()=>applyLang(LANG==='en'?'pl':'en');
+
+// ---- theme ----
+function applyTheme(th){
+  document.documentElement.setAttribute('data-theme',th);
+  localStorage.setItem('au_theme',th);
+  el('themeBtn').textContent=th==='dark'?'☀️':'🌙';
+}
+el('themeBtn').onclick=()=>applyTheme(document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark');
+applyTheme(localStorage.getItem('au_theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'));
 
 // ---- tabs ----
 let logTimer=null;
@@ -144,12 +198,12 @@ document.querySelectorAll('nav .tab').forEach(b=>b.onclick=()=>{
 async function load(){
   const d=await (await fetch('/api/guests')).json();
   SET=d.settings;
-  el('pauseBtn').textContent=SET.paused?'▶ Wznów':'⏸ Pauza globalna';
-  el('pausetag').innerHTML=SET.paused?'<span class="tag pause">PAUZA</span>':'';
+  el('pauseBtn').textContent=SET.paused?t('resume'):t('pause');
+  el('pausetag').innerHTML=SET.paused?`<span class="tag pause">${t('pauseTag')}</span>`:'';
   const rows=el('rows'); rows.innerHTML='';
   for(const g of d.guests){
     const c=g.config, r=g.report;
-    const sched=c.mode==='calendar'?`${(c.times||[]).join(',')} · dni ${(c.weekdays||[]).join(',')||'wsz.'}`:`co ${c.interval_minutes} min`;
+    const sched=c.mode==='calendar'?`${(c.times||[]).join(',')} · ${t('daysWord')} ${(c.weekdays||[]).join(',')||t('allDays')}`:`${c.interval_minutes} min`;
     const scope=[c.security_patch?'patch':null,c.app_update?('app:'+c.app_update):null].filter(Boolean).join(' + ')||'—';
     const snapOn=c.snapshot&&c.snapshot.enabled;
     const ret=`${c.keep>0?('keep '+c.keep):'∞'}${c.max_age_days>0?(' · '+c.max_age_days+'d'):''}${snapOn?` · 📷 ${c.snapshot.prefix}${c.snapshot.dryrun?' (dry)':''}`:''}`;
@@ -157,9 +211,9 @@ async function load(){
     const tr=document.createElement('tr');
     tr.innerHTML=`<td>${g.vmid}</td><td>${g.name||''}</td>
       <td><span class="tag">${g.status}</span></td>
-      <td>${c.enabled?sched:'<span class="muted">wyłączony</span>'}</td>
+      <td>${c.enabled?sched:'<span class="muted">'+t('disabled')+'</span>'}</td>
       <td>${scope}</td><td>${ret}</td><td>${last}</td>
-      <td><button>Edytuj</button></td>`;
+      <td><button>${t('edit')}</button></td>`;
     tr.querySelector('button').onclick=()=>edit(g);
     rows.appendChild(tr);
   }
@@ -210,8 +264,8 @@ async function loadLog(){
   const box=el('logbox'), sc=box.parentElement;
   const atBottom=sc.scrollTop+sc.clientHeight>=sc.scrollHeight-30;
   const d=await (await fetch('/api/log')).json();
-  box.textContent=d.log||'(pusto)';
-  el('logMeta').textContent='ostatnie 200 linii · '+new Date().toLocaleTimeString();
+  box.textContent=d.log||t('empty');
+  el('logMeta').textContent=t('logMeta')+' · '+new Date().toLocaleTimeString();
   if(atBottom) sc.scrollTop=sc.scrollHeight;
 }
 function startLogAuto(){stopLogAuto();if(el('logAuto').checked)logTimer=setInterval(loadLog,5000)}
@@ -219,7 +273,7 @@ function stopLogAuto(){if(logTimer){clearInterval(logTimer);logTimer=null}}
 el('logRefresh').onclick=loadLog;
 el('logAuto').onchange=()=>el('logAuto').checked?startLogAuto():stopLogAuto();
 
-load();
+applyLang(LANG);
 </script>
 </body>
 </html>
