@@ -34,13 +34,30 @@ command -v pveversion >/dev/null 2>&1 || die "to nie wygląda na host Proxmox VE
 command -v pct >/dev/null 2>&1 || die "brak pct"
 info "Proxmox: $(pveversion | head -1)"
 
-have_whiptail=0
-if [ "${AU_NONINTERACTIVE:-0}" != 1 ] && command -v whiptail >/dev/null 2>&1; then
-  have_whiptail=1
-fi
 WT=(whiptail --backtitle "proxmox-adminupdater" --title "proxmox-adminupdater")
 wt_input()  { "${WT[@]}" --inputbox    "$1" 9  68 "$2" 3>&1 1>&2 2>&3; }
 wt_pass()   { "${WT[@]}" --passwordbox  "$1" 9  68 ""  3>&1 1>&2 2>&3; }
+tx()        { local v=""; read -rp "   $1 [$2]: " v </dev/tty 2>/dev/null || true; echo "${v:-$2}"; }
+ask()       { local v=""; read -rp "   $1 " v </dev/tty 2>/dev/null || true; echo "$v"; }
+
+# Which wizard to use. Unless AU_NONINTERACTIVE=1 is set explicitly, the user
+# ALWAYS gets a menu: whiptail if present (or installable), otherwise a plain
+# text wizard. It must never silently auto-create a container.
+WIZARD="text"
+if [ "${AU_NONINTERACTIVE:-0}" = 1 ]; then
+  WIZARD="none"; info "AU_NONINTERACTIVE=1 — pomijam kreator, używam defaultów/env"
+elif command -v whiptail >/dev/null 2>&1; then
+  WIZARD="whiptail"
+else
+  warn "brak whiptail — próbuję doinstalować (potrzebny do menu)…"
+  if apt-get -qq update >/dev/null 2>&1 && apt-get -qq install -y whiptail >/dev/null 2>&1 \
+     && command -v whiptail >/dev/null 2>&1; then
+    WIZARD="whiptail"; msg "whiptail zainstalowany"
+  else
+    warn "whiptail niedostępny — używam kreatora tekstowego"
+  fi
+fi
+[ "$WIZARD" != none ] && info "Kreator: ${WIZARD}"
 
 # ---------- defaults ----------
 NEXTID=$(pvesh get /cluster/nextid 2>/dev/null || echo 210)
@@ -67,7 +84,7 @@ if [ -n "${AU_NET:-}" ] && [ "${AU_NET}" != "dhcp" ]; then
 fi
 
 # ---------- wizard ----------
-if [ "$have_whiptail" = 1 ]; then
+if [ "$WIZARD" = "whiptail" ]; then
   MODE=$("${WT[@]}" --menu "Tryb instalacji" 12 68 2 \
     "1" "Default  — automatyczne ustawienia (DHCP, vmbr0)" \
     "2" "Advanced — CT ID, hostname, sieć, DNS, zasoby" 3>&1 1>&2 2>&3) || die "anulowano"
@@ -106,6 +123,30 @@ if [ "$have_whiptail" = 1 ]; then
 
 Utworzyć kontener?" 16 68 || die "anulowano przez użytkownika"
   fi
+elif [ "$WIZARD" = "text" ]; then
+  echo
+  echo "   Tryb instalacji:"
+  echo "     1) Default  — automatyczne (DHCP, ${DEF_BRIDGE}, CTID ${DEF_CTID})"
+  echo "     2) Advanced — wybierz CTID, sieć, zasoby"
+  MODE="$(tx 'Wybór (1/2)' '1')"
+  if [ "$MODE" = "2" ]; then
+    a="$(ask 'Unprivileged? [T/n]:')"; [ "${a,,}" = n ] && CTTYPE=0 || CTTYPE=1
+    read -rsp "   Hasło root (puste = losowe): " PASSWORD </dev/tty 2>/dev/null || true; echo
+    CTID="$(tx 'Container ID' "$DEF_CTID")"
+    HOSTNAME="$(tx 'Hostname' "$DEF_HOST")"
+    DISK="$(tx 'Dysk (GB)' "$DEF_DISK")"
+    CORES="$(tx 'Rdzenie CPU' "$DEF_CORES")"
+    RAM="$(tx 'RAM (MiB)' "$DEF_RAM")"
+    STORE="$(tx "Storage [${STORES[*]:-local-lvm}]" "$DEF_STORE")"
+    BRIDGE="$(tx "Bridge [${BRIDGES[*]}]" "$DEF_BRIDGE")"
+    IP4="$(tx 'IPv4 CIDR, np. 192.168.1.50/24 (puste = DHCP)' '')"
+    if [ -n "$IP4" ]; then IP4MODE=static; GW="$(tx 'Brama (gateway)' '')"; fi
+    DNS="$(tx 'DNS (puste = dziedzicz z hosta)' '')"
+    a="$(ask 'Nesting? [T/n]:')"; [ "${a,,}" = n ] && NESTING=0 || NESTING=1
+  fi
+  echo
+  echo "   Podsumowanie: CT ${CTID} ($([ "$CTTYPE" = 1 ] && echo unpriv || echo priv)) · ${CORES}vCPU/${RAM}MiB/${DISK}GB · ${STORE} · ${BRIDGE} · $([ "$IP4MODE" = static ] && echo "$IP4 gw=${GW}" || echo DHCP)"
+  a="$(ask 'Utworzyć kontener? [T/n]:')"; [ "${a,,}" = n ] && die "anulowano przez użytkownika"
 fi
 
 # ---------- validate ----------
