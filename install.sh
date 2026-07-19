@@ -77,6 +77,7 @@ CTID="${AU_CTID:-$DEF_CTID}";      HOSTNAME="${AU_HOSTNAME:-$DEF_HOST}"
 DISK="${AU_DISK:-$DEF_DISK}";      CORES="${AU_CORES:-$DEF_CORES}"
 RAM="${AU_RAM:-$DEF_RAM}";         STORE="${AU_STORE:-$DEF_STORE}"
 BRIDGE="${AU_BRIDGE:-$DEF_BRIDGE}"; DNS="${AU_NS:-}"; NESTING="${AU_NESTING:-1}"
+ALLOW_ALL="${AU_ALLOW_ALL:-0}"           # 1 = host.conf allowed_ctids = * (trust panel)
 # IPv4: parse AU_NET ("dhcp" | "CIDR,gw=GW")
 IP4MODE="dhcp"; IP4=""; GW=""
 if [ -n "${AU_NET:-}" ] && [ "${AU_NET}" != "dhcp" ]; then
@@ -113,6 +114,11 @@ if [ "$WIZARD" = "whiptail" ]; then
     else
       NESTING=0
     fi
+    if "${WT[@]}" --yesno "Zezwolić OD RAZU na wszystkie kontenery (allowed_ctids = *)?\n\nWygodne — whitelista z panelu wystarcza. Ale słabsza izolacja: przejęty panel mógłby zlecić update na dowolny CT.\n\nZalecane: Nie — CT dopiszesz ręcznie w host.conf." 14 70 --defaultno; then
+      ALLOW_ALL=1
+    else
+      ALLOW_ALL=0
+    fi
     "${WT[@]}" --yesno "Podsumowanie:
 
   CT ID:     $CTID   ($([ "$CTTYPE" = 1 ] && echo unprivileged || echo privileged))
@@ -143,6 +149,7 @@ elif [ "$WIZARD" = "text" ]; then
     if [ -n "$IP4" ]; then IP4MODE=static; GW="$(tx 'Brama (gateway)' '')"; fi
     DNS="$(tx 'DNS (puste = dziedzicz z hosta)' '')"
     a="$(ask 'Nesting? [T/n]:')"; [ "${a,,}" = n ] && NESTING=0 || NESTING=1
+    a="$(ask 'Zezwolić na WSZYSTKIE CT (allowed_ctids = *)? — wygodne, mniej bezpieczne [t/N]:')"; [ "${a,,}" = t ] && ALLOW_ALL=1 || ALLOW_ALL=0
   fi
   echo
   echo "   Podsumowanie: CT ${CTID} ($([ "$CTTYPE" = 1 ] && echo unpriv || echo priv)) · ${CORES}vCPU/${RAM}MiB/${DISK}GB · ${STORE} · ${BRIDGE} · $([ "$IP4MODE" = static ] && echo "$IP4 gw=${GW}" || echo DHCP)"
@@ -264,6 +271,7 @@ install -d /etc/proxmox-adminupdater/recipes
 cp "$htmp"/*/host/recipes/*.sh /etc/proxmox-adminupdater/recipes/ 2>/dev/null || true
 cp "$htmp"/*/host/proxmox-adminupdater.service /etc/systemd/system/
 cp "$htmp"/*/host/proxmox-adminupdater.timer   /etc/systemd/system/
+ACL_VALUE=""; [ "$ALLOW_ALL" = 1 ] && ACL_VALUE="*"
 if [ ! -f /etc/proxmox-adminupdater/host.conf ]; then
   cat > /etc/proxmox-adminupdater/host.conf <<EOF
 [main]
@@ -271,7 +279,7 @@ updater_url    = http://${CT_IP}
 token          = ${EXECTOK}
 # Druga bramka: dopisz CT (np. 101,105) albo "*" = ufaj panelowi. Puste = nic.
 # Zmiana łapie się przy następnym tyknięciu timera (bez restartu).
-allowed_ctids  =
+allowed_ctids  = ${ACL_VALUE}
 recipes_dir    = /etc/proxmox-adminupdater/recipes
 exec_timeout   = 1800
 tls_insecure   = false
@@ -300,10 +308,15 @@ echo -e "   Panel:     ${BD}http://${CT_IP}/${NC}   (login: poświadczenia Proxm
 echo -e "   Kontener:  CT ${BD}${CTID}${NC} (${HOSTNAME}) · IP ${BD}${CT_IP}${NC} · hasło root ${BD}${PASSWORD}${NC}"
 echo -e "   Host conf: ${BD}/etc/proxmox-adminupdater/host.conf${NC}"
 echo
-echo -e "   ${YW}WAŻNE:${NC} nic się nie zaktualizuje, dopóki nie zezwolisz na CT po stronie hosta"
-echo -e "          w ${BD}/etc/proxmox-adminupdater/host.conf${NC} (druga bramka bezpieczeństwa):"
-echo -e "            • wybrane:  ${BD}allowed_ctids = 101,105${NC}"
-echo -e "            • wszystkie:${BD}allowed_ctids = *${NC}  (ufaj panelowi — wygodne, mniej bezpieczne)"
-echo -e "          Zmiana łapie się przy ${BD}następnym${NC} tyknięciu timera (restart nie jest wymagany)."
+if [ "$ALLOW_ALL" = 1 ]; then
+  echo -e "   ${YW}UWAGA:${NC} ustawiono ${BD}allowed_ctids = *${NC} — host ufa panelowi (whitelista z UI)."
+  echo -e "          Wygodne, ale słabsza izolacja. Zawęź w host.conf, jeśli chcesz."
+else
+  echo -e "   ${YW}WAŻNE:${NC} nic się nie zaktualizuje, dopóki nie zezwolisz na CT po stronie hosta"
+  echo -e "          w ${BD}/etc/proxmox-adminupdater/host.conf${NC} (druga bramka bezpieczeństwa):"
+  echo -e "            • wybrane:  ${BD}allowed_ctids = 101,105${NC}"
+  echo -e "            • wszystkie:${BD}allowed_ctids = *${NC}  (ufaj panelowi — wygodne, mniej bezpieczne)"
+  echo -e "          Zmiana łapie się przy ${BD}następnym${NC} tyknięciu timera (restart nie jest wymagany)."
+fi
 echo -e "   ${YW}HTTPS:${NC} wystaw panel przez reverse proxy (np. NPM) → http://${CT_IP}:80"
 echo
