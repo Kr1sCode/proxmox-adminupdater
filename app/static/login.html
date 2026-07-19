@@ -4,12 +4,13 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>adminupdater — login</title>
 <style>
-  :root{color-scheme:light;--bg:#f8fafc;--fg:#1e293b;--bd:#e2e8f0;--accent:#3b82f6}
-  html[data-theme="dark"]{color-scheme:dark;--bg:#0f172a;--fg:#e2e8f0;--bd:#334155}
+  :root{color-scheme:light;--bg:#f8fafc;--fg:#1e293b;--bd:#e2e8f0;--accent:#3b82f6;--chip-bg:#1e293b;--chip-fg:#ffffff}
+  html[data-theme="dark"]{color-scheme:dark;--bg:#0f172a;--fg:#e2e8f0;--bd:#334155;--chip-bg:#f1f5f9;--chip-fg:#0f172a}
   html,body{height:100%;margin:0}
   body{font:15px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--fg)}
   .toggles{position:fixed;top:12px;right:14px;display:flex;gap:.4rem}
-  .toggles button{padding:.35rem .55rem;border:1px solid var(--bd);border-radius:8px;background:transparent;color:inherit;cursor:pointer;font:inherit}
+  .toggles button{padding:.35rem .6rem;border:1px solid var(--chip-bg);border-radius:8px;background:var(--chip-bg);color:var(--chip-fg);cursor:pointer;font:inherit;font-weight:700}
+  .toggles button:hover{opacity:.85}
   .box{max-width:400px;margin:12vh auto;padding:0 1rem}
   h1{font-size:1.3rem} label{display:block;margin:.8rem 0 .2rem;font-weight:600}
   input{width:100%;padding:.55rem;border:1px solid var(--bd);border-radius:8px;background:transparent;color:inherit}

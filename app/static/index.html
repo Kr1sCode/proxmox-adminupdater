@@ -4,8 +4,8 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>adminupdater</title>
 <style>
-  :root{color-scheme:light;--bg:#f8fafc;--fg:#1e293b;--bd:#e2e8f0;--muted:#64748b;--card:#ffffff;--head:#ffffff;--accent:#3b82f6}
-  html[data-theme="dark"]{color-scheme:dark;--bg:#0f172a;--fg:#e2e8f0;--bd:#334155;--muted:#94a3b8;--card:#1e293b;--head:#0f172a}
+  :root{color-scheme:light;--bg:#f8fafc;--fg:#1e293b;--bd:#e2e8f0;--muted:#64748b;--card:#ffffff;--head:#ffffff;--accent:#3b82f6;--chip-bg:#1e293b;--chip-fg:#ffffff}
+  html[data-theme="dark"]{color-scheme:dark;--bg:#0f172a;--fg:#e2e8f0;--bd:#334155;--muted:#94a3b8;--card:#1e293b;--head:#0f172a;--chip-bg:#f1f5f9;--chip-fg:#0f172a}
   *{box-sizing:border-box}
   html,body{height:100%;margin:0}
   body{font:15px/1.5 system-ui,sans-serif;display:flex;flex-direction:column;overflow:hidden;background:var(--bg);color:var(--fg)}
@@ -13,7 +13,8 @@
   h1{font-size:1.2rem;margin:0} .sp{flex:1}
   button{padding:.45rem .9rem;border:1px solid var(--bd);border-radius:8px;background:transparent;color:inherit;cursor:pointer;font:inherit}
   button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
-  button.icon{padding:.4rem .6rem}
+  button.icon{padding:.4rem .65rem;background:var(--chip-bg);color:var(--chip-fg);border:1px solid var(--chip-bg);font-weight:700}
+  button.icon:hover{opacity:.85}
   nav{display:flex;gap:.3rem;padding:.5rem 1.2rem 0}
   nav button{border-bottom:2px solid transparent;border-radius:8px 8px 0 0}
   nav button.active{border-bottom-color:var(--accent);font-weight:600}
