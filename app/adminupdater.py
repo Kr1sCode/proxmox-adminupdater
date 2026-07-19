@@ -12,9 +12,22 @@ import time
 
 import core
 
+# Independent snapshot schedule (autosnap-style), decoupled from updates.
+SNAPSHOT_DEFAULTS = {
+    "enabled": False,
+    "mode": "calendar",          # "interval" | "calendar"
+    "interval_minutes": 1440,    # daily, interval mode
+    "times": ["02:00"],
+    "weekdays": [],              # [] = every day
+    "prefix": "auto",            # snapshot name prefix (distinct from preupd_)
+    "keep": None,                # None = inherit default_keep
+    "max_age_days": None,        # None = inherit default_max_age_days
+    "dryrun": False,             # log what would happen, take nothing
+}
+
 # One entry per guest the user opted in.
 GUEST_DEFAULTS = {
-    "enabled": False,
+    "enabled": False,            # UPDATE schedule enabled
     "mode": "calendar",          # "interval" | "calendar"
     "interval_minutes": 10080,   # weekly, interval mode
     "times": ["03:30"],          # calendar mode
@@ -22,8 +35,10 @@ GUEST_DEFAULTS = {
     "security_patch": True,      # OS patch upgrade (distro auto-detected on host)
     "app_update": None,          # None, or a recipe name present in host recipes dir
     "pre_snapshot": True,        # rollback snapshot before touching the guest
-    "keep": None,                # keep newest N preupd_ snapshots (0 = no count limit); None = inherit
-    "max_age_days": None,        # delete preupd_ older than N days (0 = off); None = inherit
+    "keep": None,                # preupd_ retention: keep newest N (0 = off); None = inherit
+    "max_age_days": None,        # preupd_ retention: delete older than N days (0 = off); None = inherit
+    "health_check": {"type": "none", "arg": ""},  # post-update probe; fail -> rollback
+    "snapshot": None,            # None = inherit SNAPSHOT_DEFAULTS (disabled)
 }
 
 # The ONLY actions the host executor accepts. Plans never carry raw commands.
@@ -36,10 +51,20 @@ def guest_settings(cfg, vmid):
     g = dict(GUEST_DEFAULTS)
     g.update(cfg.get("guests", {}).get(str(vmid), {}))
     sett = cfg.get("settings", {})
+    dk, da = int(sett.get("default_keep", 3)), int(sett.get("default_max_age_days", 0))
     if g.get("keep") is None:
-        g["keep"] = int(sett.get("default_keep", 3))
+        g["keep"] = dk
     if g.get("max_age_days") is None:
-        g["max_age_days"] = int(sett.get("default_max_age_days", 0))
+        g["max_age_days"] = da
+    hc = g.get("health_check") if isinstance(g.get("health_check"), dict) else {}
+    g["health_check"] = {"type": hc.get("type", "none"), "arg": str(hc.get("arg", ""))}
+    s = dict(SNAPSHOT_DEFAULTS)
+    s.update(g.get("snapshot") or {})
+    if s.get("keep") is None:
+        s["keep"] = dk
+    if s.get("max_age_days") is None:
+        s["max_age_days"] = da
+    g["snapshot"] = s
     return g
 
 
@@ -55,34 +80,48 @@ def compute_plan():
     jobs = []
     for vmid in cfg.get("guests", {}):
         g = guest_settings(cfg, vmid)
-        if not g["enabled"]:
-            continue
-        last = state.get(str(vmid), {}).get("last_run", 0)
-        if not core.is_due(g, last, now):
-            continue
-        # One job per guest: a SINGLE pre-snapshot covers all actions, run in
-        # order (security patches, then the app recipe) under one rollback point.
-        actions = []
-        if g["security_patch"]:
-            actions.append("security-patch")
-        app = g.get("app_update")
-        if app and _APP_RE.match(str(app)):
-            actions.append("app-update")
-        elif app:
-            core.log(f"guest {vmid}: invalid app recipe {app!r} -> skipped")
-            app = None
-        if not actions:
-            continue
-        jobs.append({
-            "ctid": int(vmid),
-            "actions": actions,
-            "app": str(app) if app else None,
-            "pre_snapshot": bool(g["pre_snapshot"]),
-            "snapshot_prefix": sett["snapshot_prefix"],
-            "rollback_on_fail": bool(sett["rollback_on_fail"]),
-            "keep": int(g["keep"]),
-            "max_age_days": int(g["max_age_days"]),
-        })
+        st = state.get(str(vmid), {})
+
+        # --- UPDATE job: ONE pre-snapshot covers all actions, run in order
+        # (security patches, then app recipe, then health-check) under one
+        # rollback point. Its own clock: last_run.
+        if g["enabled"] and core.is_due(g, st.get("last_run", 0), now):
+            actions = []
+            if g["security_patch"]:
+                actions.append("security-patch")
+            app = g.get("app_update")
+            if app and _APP_RE.match(str(app)):
+                actions.append("app-update")
+            elif app:
+                core.log(f"guest {vmid}: invalid app recipe {app!r} -> skipped")
+                app = None
+            if actions:
+                jobs.append({
+                    "kind": "update",
+                    "ctid": int(vmid),
+                    "actions": actions,
+                    "app": str(app) if app else None,
+                    "pre_snapshot": bool(g["pre_snapshot"]),
+                    "snapshot_prefix": sett["snapshot_prefix"],
+                    "rollback_on_fail": bool(sett["rollback_on_fail"]),
+                    "keep": int(g["keep"]),
+                    "max_age_days": int(g["max_age_days"]),
+                    "health_check": g["health_check"],
+                })
+
+        # --- SNAPSHOT job: independent scheduled snapshot (autosnap-style),
+        # separate clock: last_snap_run. Distinct prefix so retention families
+        # never collide.
+        s = g["snapshot"]
+        if s["enabled"] and core.is_due(s, st.get("last_snap_run", 0), now):
+            jobs.append({
+                "kind": "snapshot",
+                "ctid": int(vmid),
+                "snapshot_prefix": s["prefix"],
+                "keep": int(s["keep"]),
+                "max_age_days": int(s["max_age_days"]),
+                "dryrun": bool(s["dryrun"]),
+            })
     return jobs
 
 
@@ -93,17 +132,23 @@ def record_report(results):
     for r in results:
         vmid = str(r.get("ctid"))
         entry = state.get(vmid, {})
-        entry["last_run"] = now
-        last = {"status": r.get("status"), "snapshot": r.get("snapshot"),
-                "ts": r.get("ts"), "steps": r.get("steps", []),
-                "pruned": r.get("pruned", [])}
-        entry["last"] = last
-        entry["history"] = ([last] + entry.get("history", []))[:20]
+        kind = r.get("kind", "update")
+        rec = {"kind": kind, "status": r.get("status"), "snapshot": r.get("snapshot"),
+               "ts": r.get("ts"), "steps": r.get("steps", []),
+               "pruned": r.get("pruned", [])}
+        if kind == "snapshot":
+            entry["last_snap_run"] = now
+            entry["last_snap"] = rec
+        else:
+            entry["last_run"] = now
+            entry["last"] = rec
+        entry.setdefault("history", [])
+        entry["history"] = ([rec] + entry["history"])[:30]
         state[vmid] = entry
         step_summary = ", ".join(f"{s.get('action')}:{s.get('status')}" for s in r.get("steps", []))
         pruned = r.get("pruned", [])
         prune_note = f" pruned={len(pruned)}" if pruned else ""
-        core.log(f"{vmid} -> {r.get('status')} snap={r.get('snapshot')} [{step_summary}]{prune_note}")
+        core.log(f"{vmid} [{kind}] -> {r.get('status')} snap={r.get('snapshot')} [{step_summary}]{prune_note}")
     core.save_state(state)
     return {"recorded": len(results)}
 
@@ -116,9 +161,10 @@ def guest_view():
     state = core.load_state()
     out = []
     for vmid, meta in sorted(idx.items(), key=lambda kv: int(kv[0])):
+        st = state.get(vmid, {})
         out.append({"vmid": int(vmid), "name": meta["name"], "status": meta["status"],
                     "config": guest_settings(cfg, vmid),
-                    "report": state.get(vmid, {}).get("last")})
+                    "report": st.get("last"), "report_snap": st.get("last_snap")})
     return {"settings": cfg["settings"], "guests": out}
 
 

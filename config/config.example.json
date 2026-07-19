@@ -22,7 +22,18 @@
       "app_update": "example-app",
       "pre_snapshot": true,
       "keep": null,
-      "max_age_days": null
+      "max_age_days": null,
+      "health_check": { "type": "systemd", "arg": "docker" },
+      "snapshot": {
+        "enabled": true,
+        "mode": "calendar",
+        "times": ["02:00"],
+        "weekdays": [],
+        "prefix": "auto",
+        "keep": 7,
+        "max_age_days": 0,
+        "dryrun": false
+      }
     }
   }
 }

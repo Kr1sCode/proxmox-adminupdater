@@ -275,6 +275,9 @@ allowed_ctids  =
 recipes_dir    = /etc/proxmox-adminupdater/recipes
 exec_timeout   = 1800
 tls_insecure   = false
+# Raport e-mail przez pocztę hosta (Proxmox postfix). notify_on: always|errors|never
+notify_email   =
+notify_on      = errors
 EOF
   chmod 600 /etc/proxmox-adminupdater/host.conf
 fi

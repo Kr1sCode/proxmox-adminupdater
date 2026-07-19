@@ -14,12 +14,15 @@ import configparser
 import json
 import os
 import re
+import shlex
+import smtplib
 import ssl
 import subprocess
 import sys
 import time
 import urllib.request
 from datetime import datetime, timezone
+from email.mime.text import MIMEText
 
 CFG = os.environ.get("ADMINUPDATER_HOST_CONF", "/etc/proxmox-adminupdater/host.conf")
 
@@ -39,6 +42,9 @@ def load_cfg():
         "recipes_dir": g.get("recipes_dir", "/etc/proxmox-adminupdater/recipes"),
         "timeout": g.getint("exec_timeout", 1800),
         "insecure": g.getboolean("tls_insecure", False),
+        "notify_email": g.get("notify_email", "").strip(),
+        "notify_on": g.get("notify_on", "errors").strip().lower(),   # always | errors | never
+        "notify_from": g.get("notify_from", "adminupdater@" + os.uname().nodename).strip(),
     }
 
 
@@ -149,32 +155,78 @@ def prune_snapshots(ctid, prefix, keep, max_age_days):
     return deleted
 
 
+def build_health_check(hc):
+    """Structured post-update probe -> a command, built HOST-side from a
+    type+arg. No raw command string ever crosses from the LXC."""
+    t = (hc or {}).get("type", "none")
+    arg = str((hc or {}).get("arg", "")).strip()
+    if t == "none" or not arg:
+        return None
+    if t == "systemd":
+        if not re.match(r"^[A-Za-z0-9@._:-]+$", arg):
+            return None
+        return ["bash", "-lc", f"systemctl is-active --quiet {arg}"]
+    if t == "http":
+        if not re.match(r"^https?://[^\s'\"`;$\\]+$", arg):
+            return None
+        return ["bash", "-lc", f"curl -fsS -o /dev/null --max-time 10 -- {shlex.quote(arg)}"]
+    return None
+
+
+def _rollback_verdict(snap, job, ctid, timeout):
+    if snap and job.get("rollback_on_fail"):
+        return "rolled-back" if rollback(ctid, snap, timeout) else "failed-rollback"
+    return "failed"
+
+
 def do_job(cfg, job):
     ctid = int(job["ctid"])
-    # back-compat: accept a list "actions" or a single legacy "action"
-    actions = job.get("actions") or ([job["action"]] if job.get("action") else [])
-    res = {"ctid": ctid, "ts": datetime.now(timezone.utc).isoformat(),
-           "snapshot": None, "steps": []}
+    kind = job.get("kind", "update")
+    prefix = job.get("snapshot_prefix", "preupd")
+    res = {"ctid": ctid, "kind": kind, "ts": datetime.now(timezone.utc).isoformat(),
+           "snapshot": None, "steps": [], "pruned": []}
 
     if not (cfg.get("allow_all") or ctid in cfg["allowed"]):
         return {**res, "status": "rejected",
-                "steps": [{"action": a, "status": "rejected", "rc": -1,
-                           "log": "ctid poza whitelistą hosta"} for a in actions]}
+                "steps": [{"action": kind, "status": "rejected", "rc": -1,
+                           "log": "ctid poza whitelistą hosta"}]}
 
-    # 1) ONE snapshot up front — the rollback point for every action below.
-    snap = None
-    if job.get("pre_snapshot", True):
-        snap, snaplog = snapshot(ctid, job.get("snapshot_prefix", "preupd"))
+    # ===== independent scheduled snapshot job (autosnap-style) =====
+    if kind == "snapshot":
+        if job.get("dryrun"):
+            name = f"{prefix}_{datetime.now():%Y%m%d_%H%M%S}"
+            res.update(snapshot=name, status="ok",
+                       steps=[{"action": "snapshot", "status": "dryrun", "rc": 0,
+                               "log": f"[DRY-RUN] utworzyłbym {name}"}])
+            return res
+        snap, snaplog = snapshot(ctid, prefix)
         res["snapshot"] = snap
         if snap is None:
-            return {**res, "status": "error",
-                    "steps": [{"action": "snapshot", "status": "error", "rc": -1,
-                               "log": "snapshot nieudany: " + snaplog[-500:]}]}
+            res.update(status="error",
+                       steps=[{"action": "snapshot", "status": "error", "rc": -1,
+                               "log": "snapshot nieudany: " + snaplog[-500:]}])
+            return res
+        res["steps"].append({"action": "snapshot", "status": "ok", "rc": 0, "log": snap})
+        res["pruned"] = prune_snapshots(ctid, prefix, job.get("keep", 0), job.get("max_age_days", 0))
+        res["status"] = "ok"
+        return res
 
-    # 1b) retention: prune old preupd_ snapshots (the fresh one is protected by
-    # keep>=1, or by age 0 when only max_age_days is set)
-    res["pruned"] = prune_snapshots(ctid, job.get("snapshot_prefix", "preupd"),
-                                    job.get("keep", 0), job.get("max_age_days", 0))
+    # ===== update job =====
+    actions = job.get("actions") or ([job["action"]] if job.get("action") else [])
+
+    # 1) ONE snapshot up front — the rollback point for every step below.
+    snap = None
+    if job.get("pre_snapshot", True):
+        snap, snaplog = snapshot(ctid, prefix)
+        res["snapshot"] = snap
+        if snap is None:
+            res.update(status="error",
+                       steps=[{"action": "snapshot", "status": "error", "rc": -1,
+                               "log": "snapshot nieudany: " + snaplog[-500:]}])
+            return res
+
+    # 1b) retention on preupd_ (fresh one protected by keep>=1 / age 0)
+    res["pruned"] = prune_snapshots(ctid, prefix, job.get("keep", 0), job.get("max_age_days", 0))
 
     # 2) detect the guest OS ONCE
     distro = detect_distro(ctid)
@@ -197,13 +249,101 @@ def do_job(cfg, job):
         res["steps"].append({**step, "status": ("ok" if rc == 0 else "failed"),
                              "rc": rc, "log": out[-2000:]})
         if rc != 0:
-            overall = "failed"
-            if snap and job.get("rollback_on_fail"):
-                overall = "rolled-back" if rollback(ctid, snap, cfg["timeout"]) else "failed-rollback"
-            break  # stop the chain; the snapshot is the safety net
+            res["status"] = _rollback_verdict(snap, job, ctid, cfg["timeout"])
+            return res  # stop the chain; the snapshot is the safety net
+
+    # 4) post-update health-check — verify the guest actually works. A failing
+    # probe fails the run (and rolls back) even though apt/apk returned 0.
+    hcmd = build_health_check(job.get("health_check"))
+    if hcmd:
+        rc, out = run(["pct", "exec", str(ctid), "--", *hcmd], cfg["timeout"])
+        res["steps"].append({"action": "health-check",
+                             "status": ("ok" if rc == 0 else "failed"),
+                             "rc": rc, "log": out[-2000:]})
+        if rc != 0:
+            overall = _rollback_verdict(snap, job, ctid, cfg["timeout"])
 
     res["status"] = overall
     return res
+
+
+GOOD = ("ok", "skipped", "dryrun")
+
+
+def _color(s):
+    return {"ok": "#16a34a", "dryrun": "#0891b2", "skipped": "#64748b"}.get(s, "#dc2626")
+
+
+def build_email_html(results, host):
+    ok = sum(1 for r in results if r["status"] == "ok")
+    bad = [r for r in results if r["status"] not in GOOD]
+    when = datetime.now().strftime("%Y-%m-%d %H:%M")
+    cards = []
+    for r in results:
+        col = _color(r["status"])
+        steps = "".join(
+            f"<tr><td style='padding:2px 10px;color:#475569'>{s.get('action')}</td>"
+            f"<td style='padding:2px 10px;color:{_color(s.get('status'))};font-weight:600'>{s.get('status')}</td>"
+            f"<td style='padding:2px 10px;color:#94a3b8'>rc={s.get('rc')}</td></tr>"
+            for s in r.get("steps", []))
+        pruned = r.get("pruned") or []
+        prune = f" · pruned {len(pruned)}" if pruned else ""
+        cards.append(
+            f"<div style='border:1px solid #e2e8f0;border-radius:10px;margin:10px 0;overflow:hidden'>"
+            f"<div style='background:{col};color:#fff;padding:8px 12px;font-weight:700'>"
+            f"CT {r['ctid']} · {r.get('kind', 'update')} · {str(r['status']).upper()}</div>"
+            f"<div style='padding:8px 12px;font-size:13px;color:#334155'>"
+            f"<div>snapshot: <code>{r.get('snapshot') or '—'}</code>{prune}</div>"
+            f"<table style='border-collapse:collapse;margin-top:6px'>{steps}</table></div></div>")
+    banner = "#dc2626" if bad else "#16a34a"
+    title = f"{len(bad)} problem(ów)" if bad else "wszystko OK"
+    return (
+        "<!doctype html><html><body style='margin:0;background:#f1f5f9;"
+        "font-family:system-ui,Arial,sans-serif'>"
+        "<div style='max-width:680px;margin:0 auto;padding:20px'>"
+        f"<div style='background:{banner};color:#fff;border-radius:12px;padding:16px 20px'>"
+        f"<div style='font-size:18px;font-weight:800'>◆ adminupdater — {title}</div>"
+        f"<div style='opacity:.9;font-size:13px;margin-top:4px'>host {host} · {when} · "
+        f"zadań: {len(results)} · OK: {ok} · problemy: {len(bad)}</div></div>"
+        f"{''.join(cards)}"
+        "<div style='color:#94a3b8;font-size:11px;text-align:center;margin-top:12px'>"
+        "proxmox-adminupdater</div></div></body></html>")
+
+
+def send_email(cfg, subject, html):
+    msg = MIMEText(html, "html", "utf-8")
+    msg["Subject"] = subject
+    msg["From"] = cfg["notify_from"]
+    msg["To"] = cfg["notify_email"]
+    raw = msg.as_bytes()
+    # 1) Proxmox host mail transport (postfix) via sendmail — the host's config
+    for sm in ("/usr/sbin/sendmail", "/usr/lib/sendmail"):
+        if os.path.exists(sm):
+            try:
+                if subprocess.run([sm, "-t", "-i"], input=raw, timeout=30).returncode == 0:
+                    return True
+            except Exception:  # noqa: BLE001
+                pass
+    # 2) fallback: local SMTP
+    try:
+        with smtplib.SMTP("localhost", 25, timeout=15) as s:
+            s.send_message(msg)
+        return True
+    except Exception as e:  # noqa: BLE001
+        print(f"e-mail nieudany: {e}")
+        return False
+
+
+def maybe_notify(cfg, results):
+    if not cfg["notify_email"] or cfg["notify_on"] == "never" or not results:
+        return
+    bad = [r for r in results if r["status"] not in GOOD]
+    if cfg["notify_on"] == "errors" and not bad:
+        return
+    host = os.uname().nodename
+    subject = f"[adminupdater] {host}: {'problemy' if bad else 'OK'} ({len(results)} zadań)"
+    if send_email(cfg, subject, build_email_html(results, host)):
+        print(f"raport e-mail wysłany do {cfg['notify_email']}")
 
 
 def main():
@@ -214,7 +354,8 @@ def main():
         return
     results = [do_job(cfg, j) for j in jobs]
     http(cfg, "/report", "POST", {"results": results})
-    bad = [r for r in results if r["status"] not in ("ok", "skipped")]
+    maybe_notify(cfg, results)
+    bad = [r for r in results if r["status"] not in GOOD]
     print(f"wykonano {len(results)} zadań, {len(bad)} problemów")
     sys.exit(1 if bad else 0)
 

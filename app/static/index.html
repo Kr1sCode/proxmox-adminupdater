@@ -27,7 +27,8 @@
   .tag{font-size:.75rem;padding:.1rem .5rem;border-radius:99px;border:1px solid var(--bd)}
   .ok{color:#22c55e}.bad{color:#ef4444}.muted{opacity:.55}
   pre#logbox{margin:0;padding:.8rem 1rem;font:12.5px/1.5 ui-monospace,monospace;white-space:pre-wrap;word-break:break-word}
-  dialog{border:1px solid var(--bd);border-radius:12px;padding:1.2rem;max-width:460px;width:92%;color:inherit;background:Canvas}
+  dialog{border:1px solid var(--bd);border-radius:12px;padding:1.2rem;max-width:460px;width:92%;max-height:88vh;overflow-y:auto;color:inherit;background:Canvas}
+  dialog hr{border:0;border-top:1px solid var(--bd);margin:1rem 0}
   dialog label{display:block;margin:.6rem 0 .2rem;font-weight:600;font-size:.88rem}
   dialog .row{display:flex;gap:.5rem;align-items:center}
   dialog .grid2{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
@@ -96,6 +97,32 @@
     <div><label style="font-weight:400">Kasuj starsze niż (dni, 0 = off)</label><input type="number" id="dAge" min="0" value="0"></div>
   </div>
 
+  <label style="margin-top:.7rem">Health-check po aktualizacji <span class="muted">(porażka → rollback)</span></label>
+  <div class="grid2">
+    <select id="dHcType"><option value="none">— brak —</option><option value="systemd">systemd is-active</option><option value="http">HTTP curl -f</option></select>
+    <input type="text" id="dHcArg" placeholder="nginx  |  http://127.0.0.1/health">
+  </div>
+
+  <hr>
+  <div class="row"><input type="checkbox" id="sEnabled"><label style="margin:0">📷 Harmonogram migawek <span class="muted">(niezależny od aktualizacji, prefix auto_)</span></label></div>
+  <div id="snapBox">
+    <label>Tryb</label>
+    <select id="sMode"><option value="calendar">Kalendarz</option><option value="interval">Interwał</option></select>
+    <div id="sCal" class="grid2">
+      <div><label style="font-weight:400">Godzina (HH:MM)</label><input type="text" id="sTime" value="02:00"></div>
+      <div><label style="font-weight:400">Dni (pusto=codz.)</label><input type="text" id="sDays"></div>
+    </div>
+    <div id="sInt" style="display:none"><label style="font-weight:400">Co ile minut</label><input type="number" id="sInterval" value="1440"></div>
+    <div class="grid2">
+      <div><label style="font-weight:400">Prefix</label><input type="text" id="sPrefix" value="auto"></div>
+      <div><label style="font-weight:400">Trzymaj ostatnie</label><input type="number" id="sKeep" min="0" value="3"></div>
+    </div>
+    <div class="grid2">
+      <div><label style="font-weight:400">Kasuj starsze niż (dni)</label><input type="number" id="sAge" min="0" value="0"></div>
+      <div class="row" style="align-items:center;margin-top:1.6rem"><input type="checkbox" id="sDry"><label style="margin:0">Dry-run</label></div>
+    </div>
+  </div>
+
   <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1.2rem">
     <button onclick="dlg.close()">Anuluj</button><button class="primary" id="dSave">Zapisz</button>
   </div>
@@ -124,7 +151,8 @@ async function load(){
     const c=g.config, r=g.report;
     const sched=c.mode==='calendar'?`${(c.times||[]).join(',')} · dni ${(c.weekdays||[]).join(',')||'wsz.'}`:`co ${c.interval_minutes} min`;
     const scope=[c.security_patch?'patch':null,c.app_update?('app:'+c.app_update):null].filter(Boolean).join(' + ')||'—';
-    const ret=`${c.keep>0?('keep '+c.keep):'∞'}${c.max_age_days>0?(' · '+c.max_age_days+'d'):''}`;
+    const snapOn=c.snapshot&&c.snapshot.enabled;
+    const ret=`${c.keep>0?('keep '+c.keep):'∞'}${c.max_age_days>0?(' · '+c.max_age_days+'d'):''}${snapOn?` · 📷 ${c.snapshot.prefix}${c.snapshot.dryrun?' (dry)':''}`:''}`;
     const last=r?`<span class="${r.status==='ok'?'ok':'bad'}">${r.status}</span> <span class="muted">${(r.ts||'').slice(0,16).replace('T',' ')}</span>`:'<span class="muted">—</span>';
     const tr=document.createElement('tr');
     tr.innerHTML=`<td>${g.vmid}</td><td>${g.name||''}</td>
@@ -144,10 +172,17 @@ function edit(g){
   el('dInterval').value=c.interval_minutes; el('dSec').checked=c.security_patch;
   el('dApp').value=c.app_update||''; el('dSnap').checked=c.pre_snapshot;
   el('dKeep').value=c.keep; el('dAge').value=c.max_age_days;
-  toggleMode(); el('dSave').onclick=()=>save(g.vmid); el('dlg').showModal();
+  const hc=c.health_check||{}; el('dHcType').value=hc.type||'none'; el('dHcArg').value=hc.arg||'';
+  const s=c.snapshot||{};
+  el('sEnabled').checked=!!s.enabled; el('sMode').value=s.mode||'calendar';
+  el('sTime').value=(s.times||['02:00'])[0]; el('sDays').value=(s.weekdays||[]).join(',');
+  el('sInterval').value=s.interval_minutes||1440; el('sPrefix').value=s.prefix||'auto';
+  el('sKeep').value=s.keep!=null?s.keep:3; el('sAge').value=s.max_age_days!=null?s.max_age_days:0; el('sDry').checked=!!s.dryrun;
+  toggleMode(); toggleSnapMode(); el('dSave').onclick=()=>save(g.vmid); el('dlg').showModal();
 }
 function toggleMode(){const cal=el('dMode').value==='calendar';el('calBox').style.display=cal?'':'none';el('intBox').style.display=cal?'none':''}
-el('dMode').onchange=toggleMode;
+function toggleSnapMode(){const cal=el('sMode').value==='calendar';el('sCal').style.display=cal?'':'none';el('sInt').style.display=cal?'none':''}
+el('dMode').onchange=toggleMode; el('sMode').onchange=toggleSnapMode;
 async function save(vmid){
   const body={enabled:el('dEnabled').checked,mode:el('dMode').value,
     times:[el('dTime').value.trim()],
@@ -155,7 +190,15 @@ async function save(vmid){
     interval_minutes:+el('dInterval').value||10080,
     security_patch:el('dSec').checked,app_update:el('dApp').value.trim()||null,
     pre_snapshot:el('dSnap').checked,
-    keep:Math.max(0,+el('dKeep').value||0),max_age_days:Math.max(0,+el('dAge').value||0)};
+    keep:Math.max(0,+el('dKeep').value||0),max_age_days:Math.max(0,+el('dAge').value||0),
+    health_check:{type:el('dHcType').value,arg:el('dHcArg').value.trim()},
+    snapshot:{enabled:el('sEnabled').checked,mode:el('sMode').value,
+      times:[el('sTime').value.trim()],
+      weekdays:el('sDays').value.split(',').map(x=>x.trim()).filter(x=>x!=='').map(Number),
+      interval_minutes:+el('sInterval').value||1440,
+      prefix:el('sPrefix').value.trim()||'auto',
+      keep:Math.max(0,+el('sKeep').value||0),max_age_days:Math.max(0,+el('sAge').value||0),
+      dryrun:el('sDry').checked}};
   await fetch('/api/guests/'+vmid,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   el('dlg').close(); load();
 }

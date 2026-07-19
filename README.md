@@ -80,9 +80,32 @@ atomic unit under one rollback point:
 ```
 
 Ordering guarantees: **snapshot first**, then OS detection, then patches, then the
-app recipe. If any step exits non-zero the chain stops; with `rollback_on_fail`
-the guest is rolled back to that one pre-snapshot (the app step never runs on a
-half-patched box). The host timer is the only clock.
+app recipe, then an optional **health-check**. If any step exits non-zero the chain
+stops; with `rollback_on_fail` the guest is rolled back to that one pre-snapshot
+(the app step never runs on a half-patched box). The host timer is the only clock.
+
+## Health-check (verify, don't just trust the exit code)
+
+A per-guest probe runs **after** the updates. If it fails, the run is failed and
+rolled back — even when `apt`/`apk` returned 0. Structured (no raw commands cross
+from the LXC); the host builds the command:
+
+- `systemd` + `nginx` → `systemctl is-active --quiet nginx`
+- `http` + `http://127.0.0.1/health` → `curl -fsS --max-time 10 <url>`
+
+## Scheduled snapshots (autosnap built in)
+
+Beyond pre-update snapshots, each guest has an **independent snapshot schedule**
+(interval or calendar), decoupled from updates: its own clock, `auto_` prefix,
+`keep`/`max_age_days` retention, and **dry-run**. So adminupdater covers both jobs
+— scheduled snapshots *and* scheduled updates — from one panel.
+
+## Email report (via the Proxmox host's mail)
+
+After each run the host executor can send a styled **HTML report** (per guest:
+snapshot, steps, status, pruned) through the **host's own mail transport**
+(Proxmox postfix/`sendmail` — set up notifications on the host as usual). Configure
+in `host.conf`: `notify_email`, `notify_on = always|errors|never`.
 
 ## App recipes
 
