@@ -53,19 +53,27 @@ def compute_plan():
         last = state.get(str(vmid), {}).get("last_run", 0)
         if not core.is_due(g, last, now):
             continue
-        common = {
+        # One job per guest: a SINGLE pre-snapshot covers all actions, run in
+        # order (security patches, then the app recipe) under one rollback point.
+        actions = []
+        if g["security_patch"]:
+            actions.append("security-patch")
+        app = g.get("app_update")
+        if app and _APP_RE.match(str(app)):
+            actions.append("app-update")
+        elif app:
+            core.log(f"guest {vmid}: invalid app recipe {app!r} -> skipped")
+            app = None
+        if not actions:
+            continue
+        jobs.append({
             "ctid": int(vmid),
+            "actions": actions,
+            "app": str(app) if app else None,
             "pre_snapshot": bool(g["pre_snapshot"]),
             "snapshot_prefix": sett["snapshot_prefix"],
             "rollback_on_fail": bool(sett["rollback_on_fail"]),
-        }
-        if g["security_patch"]:
-            jobs.append({**common, "action": "security-patch"})
-        app = g.get("app_update")
-        if app and _APP_RE.match(str(app)):
-            jobs.append({**common, "action": "app-update", "app": str(app)})
-        elif app:
-            core.log(f"guest {vmid}: invalid app recipe {app!r} -> skipped")
+        })
     return jobs
 
 
@@ -77,13 +85,13 @@ def record_report(results):
         vmid = str(r.get("ctid"))
         entry = state.get(vmid, {})
         entry["last_run"] = now
-        last = {"action": r.get("action"), "status": r.get("status"),
-                "rc": r.get("rc"), "snapshot": r.get("snapshot"),
-                "ts": r.get("ts"), "log_tail": (r.get("log") or "")[-2000:]}
+        last = {"status": r.get("status"), "snapshot": r.get("snapshot"),
+                "ts": r.get("ts"), "steps": r.get("steps", [])}
         entry["last"] = last
         entry["history"] = ([last] + entry.get("history", []))[:20]
         state[vmid] = entry
-        core.log(f"{vmid} {r.get('action')} -> {r.get('status')} (rc={r.get('rc')})")
+        step_summary = ", ".join(f"{s.get('action')}:{s.get('status')}" for s in r.get("steps", []))
+        core.log(f"{vmid} -> {r.get('status')} snap={r.get('snapshot')} [{step_summary}]")
     core.save_state(state)
     return {"recorded": len(results)}
 

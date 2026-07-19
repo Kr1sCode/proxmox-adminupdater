@@ -269,6 +269,8 @@ if [ ! -f /etc/proxmox-adminupdater/host.conf ]; then
 [main]
 updater_url    = http://${CT_IP}
 token          = ${EXECTOK}
+# Druga bramka: dopisz CT (np. 101,105) albo "*" = ufaj panelowi. Puste = nic.
+# Zmiana łapie się przy następnym tyknięciu timera (bez restartu).
 allowed_ctids  =
 recipes_dir    = /etc/proxmox-adminupdater/recipes
 exec_timeout   = 1800
@@ -295,8 +297,10 @@ echo -e "   Panel:     ${BD}http://${CT_IP}/${NC}   (login: poświadczenia Proxm
 echo -e "   Kontener:  CT ${BD}${CTID}${NC} (${HOSTNAME}) · IP ${BD}${CT_IP}${NC} · hasło root ${BD}${PASSWORD}${NC}"
 echo -e "   Host conf: ${BD}/etc/proxmox-adminupdater/host.conf${NC}"
 echo
-echo -e "   ${YW}WAŻNE:${NC} nic się nie zaktualizuje, dopóki NIE dopiszesz CT do ${BD}allowed_ctids${NC}"
-echo -e "          w host.conf (twarda whitelista po stronie hosta), a potem:"
-echo -e "          ${BD}systemctl restart proxmox-adminupdater.timer${NC}"
+echo -e "   ${YW}WAŻNE:${NC} nic się nie zaktualizuje, dopóki nie zezwolisz na CT po stronie hosta"
+echo -e "          w ${BD}/etc/proxmox-adminupdater/host.conf${NC} (druga bramka bezpieczeństwa):"
+echo -e "            • wybrane:  ${BD}allowed_ctids = 101,105${NC}"
+echo -e "            • wszystkie:${BD}allowed_ctids = *${NC}  (ufaj panelowi — wygodne, mniej bezpieczne)"
+echo -e "          Zmiana łapie się przy ${BD}następnym${NC} tyknięciu timera (restart nie jest wymagany)."
 echo -e "   ${YW}HTTPS:${NC} wystaw panel przez reverse proxy (np. NPM) → http://${CT_IP}:80"
 echo

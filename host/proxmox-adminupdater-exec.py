@@ -27,10 +27,13 @@ def load_cfg():
     if not c.read(CFG):
         sys.exit(f"missing config {CFG}")
     g = c["main"]
+    raw = g.get("allowed_ctids", "")
+    allow_all = "*" in raw  # "trust the panel" mode: the LXC whitelist suffices
     return {
         "url": g["updater_url"].rstrip("/"),
         "token": g["token"],
-        "allowed": {int(x) for x in g.get("allowed_ctids", "").split(",") if x.strip()},
+        "allow_all": allow_all,
+        "allowed": set() if allow_all else {int(x) for x in raw.split(",") if x.strip()},
         "recipes_dir": g.get("recipes_dir", "/etc/proxmox-adminupdater/recipes"),
         "timeout": g.getint("exec_timeout", 1800),
         "insecure": g.getboolean("tls_insecure", False),
@@ -62,8 +65,7 @@ def detect_distro(ctid):
     return "unknown"
 
 
-def build_security_patch(ctid):
-    d = detect_distro(ctid)
+def build_security_patch(d):
     if d in ("debian", "ubuntu"):
         # Full upgrade. For security-only: install unattended-upgrades in the
         # guest and swap for ["bash","-lc","unattended-upgrade -v"].
@@ -107,35 +109,54 @@ def rollback(ctid, snap, timeout):
 
 
 def do_job(cfg, job):
-    ctid, action = int(job["ctid"]), job.get("action")
-    res = {"ctid": ctid, "action": action, "ts": datetime.now(timezone.utc).isoformat()}
+    ctid = int(job["ctid"])
+    # back-compat: accept a list "actions" or a single legacy "action"
+    actions = job.get("actions") or ([job["action"]] if job.get("action") else [])
+    res = {"ctid": ctid, "ts": datetime.now(timezone.utc).isoformat(),
+           "snapshot": None, "steps": []}
 
-    if ctid not in cfg["allowed"]:
-        return {**res, "status": "rejected", "rc": -1, "log": "ctid poza whitelistą hosta"}
-    if action == "security-patch":
-        cmd = build_security_patch(ctid)
-    elif action == "app-update":
-        cmd = build_app_update(cfg, ctid, str(job.get("app", "")))
-    else:
-        return {**res, "status": "rejected", "rc": -1, "log": f"nieznana akcja {action!r}"}
-    if cmd is None:
-        return {**res, "status": "skipped", "rc": 0, "log": "brak obsługi distro / recepty"}
+    if not (cfg.get("allow_all") or ctid in cfg["allowed"]):
+        return {**res, "status": "rejected",
+                "steps": [{"action": a, "status": "rejected", "rc": -1,
+                           "log": "ctid poza whitelistą hosta"} for a in actions]}
 
+    # 1) ONE snapshot up front — the rollback point for every action below.
     snap = None
     if job.get("pre_snapshot", True):
         snap, snaplog = snapshot(ctid, job.get("snapshot_prefix", "preupd"))
         res["snapshot"] = snap
         if snap is None:
-            return {**res, "status": "error", "rc": -1, "log": "snapshot nieudany: " + snaplog[-500:]}
+            return {**res, "status": "error",
+                    "steps": [{"action": "snapshot", "status": "error", "rc": -1,
+                               "log": "snapshot nieudany: " + snaplog[-500:]}]}
 
-    rc, out = run(["pct", "exec", str(ctid), "--", *cmd], cfg["timeout"])
-    res["rc"], res["log"] = rc, out[-4000:]
-    if rc == 0:
-        res["status"] = "ok"
-    elif snap and job.get("rollback_on_fail"):
-        res["status"] = "rolled-back" if rollback(ctid, snap, cfg["timeout"]) else "failed-rollback"
-    else:
-        res["status"] = "failed"
+    # 2) detect the guest OS ONCE
+    distro = detect_distro(ctid)
+
+    # 3) run each action in order under that one snapshot
+    overall = "ok"
+    for action in actions:
+        step = {"action": action}
+        if action == "security-patch":
+            cmd = build_security_patch(distro)
+        elif action == "app-update":
+            cmd = build_app_update(cfg, ctid, str(job.get("app", "")))
+        else:
+            cmd = None
+        if cmd is None:
+            res["steps"].append({**step, "status": "skipped", "rc": 0,
+                                 "log": f"brak obsługi ({distro}) / recepty"})
+            continue
+        rc, out = run(["pct", "exec", str(ctid), "--", *cmd], cfg["timeout"])
+        res["steps"].append({**step, "status": ("ok" if rc == 0 else "failed"),
+                             "rc": rc, "log": out[-2000:]})
+        if rc != 0:
+            overall = "failed"
+            if snap and job.get("rollback_on_fail"):
+                overall = "rolled-back" if rollback(ctid, snap, cfg["timeout"]) else "failed-rollback"
+            break  # stop the chain; the snapshot is the safety net
+
+    res["status"] = overall
     return res
 
 

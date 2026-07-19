@@ -56,21 +56,33 @@ drops the host executor + timer. Then:
 1. Open `http://<container-ip>/`, log in with your Proxmox credentials.
 2. Per guest: enable, pick a schedule, choose **security patches** and/or an
    **app recipe**, keep **pre-snapshot** on.
-3. On the host, add each opted-in CTID to `allowed_ctids` in
-   `/etc/proxmox-adminupdater/host.conf`, then
-   `systemctl restart proxmox-adminupdater.timer`.
+3. On the host, allow each opted-in CTID in `/etc/proxmox-adminupdater/host.conf`
+   — `allowed_ctids = 101,105` for a set, or `allowed_ctids = *` to trust the
+   panel. Changes apply on the **next timer tick** (no restart needed).
 
-## How a run works
+## End-to-end: what one scheduled run does
+
+For a guest that is enabled, due, and allowed by the host, a single run is one
+atomic unit under one rollback point:
 
 ```
-host timer (every ~15 min)
-  → GET  http://<ct>/plan     (Bearer)  → LXC returns jobs due now (live is_due)
-  → per job:  pct snapshot → pct exec (apt/apk/pacman or recipe) → capture rc
-  → POST http://<ct>/report   (Bearer)  → LXC stores last_run + history
+① schedule           panel (Edit modal): mode + times/weekdays or interval
+                     → stored per guest; the LXC computes "due" live via is_due
+② plan               host timer → GET /plan → ONE job per due guest:
+                       { ctid, actions:[security-patch, app-update], app, … }
+③ pre-snapshot       host: pct snapshot preupd_YYYYMMDD_HHMMSS   (once)
+④ detect OS          host: pct exec … cat /etc/os-release → debian|ubuntu|alpine|arch
+⑤ security patches   host: pct exec …  apt-get upgrade / apk upgrade / pacman -Syu
+⑥ app update         host: pct push <recipe> → pct exec …  (community-scripts `update`,
+                       docker compose pull/up, …)
+⑦ report             host → POST /report → LXC stores status + per-step log + history;
+                       last_run set → guest no longer "due" (idempotent)
 ```
 
-The host timer is the only clock; a reported run sets `last_run`, so it stops
-being due — idempotent. Distro (Debian/Ubuntu/Alpine/Arch) is auto-detected.
+Ordering guarantees: **snapshot first**, then OS detection, then patches, then the
+app recipe. If any step exits non-zero the chain stops; with `rollback_on_fail`
+the guest is rolled back to that one pre-snapshot (the app step never runs on a
+half-patched box). The host timer is the only clock.
 
 ## App recipes
 
