@@ -39,6 +39,7 @@ GUEST_DEFAULTS = {
     "keep": None,                # preupd_ retention: keep newest N (0 = off); None = inherit
     "max_age_days": None,        # preupd_ retention: delete older than N days (0 = off); None = inherit
     "health_check": {"type": "none", "arg": ""},  # post-update probe; fail -> rollback
+    "auto_reboot": False,        # reboot after update IF /var/run/reboot-required, then verify
     "snapshot": None,            # None = inherit SNAPSHOT_DEFAULTS (disabled)
 }
 
@@ -95,6 +96,7 @@ def build_update_job(g, vmid, sett):
         "keep": int(g["keep"]),
         "max_age_days": int(g["max_age_days"]),
         "health_check": g["health_check"],
+        "auto_reboot": bool(g.get("auto_reboot")),
     }
 
 

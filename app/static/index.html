@@ -265,9 +265,16 @@
       <div><label class="thin" data-i18n="daysLbl">Days (0=Mon…6=Sun, empty=daily)</label><input type="text" id="dDays" value="6"></div>
     </div></div>
     <div id="intBox" style="display:none"><label data-i18n="everyMinLbl">Every N minutes</label><input type="number" id="dInterval" value="10080"></div>
-    <div class="row" style="margin-top:.7rem"><input type="checkbox" id="dSec"><label style="margin:0" data-i18n="secPatch">OS security patches</label></div>
-    <label data-i18n="appRecipe">App update recipe (name without .sh; empty = none)</label><input type="text" id="dApp">
+    <div class="row" style="margin-top:.7rem"><input type="checkbox" id="dSec"><label style="margin:0" data-i18n="secPatch">OS package updates</label></div>
+    <label data-i18n="appTitle">Application update</label>
+    <select id="dAppMode">
+      <option value="none" data-i18n="appNone">— none —</option>
+      <option value="auto" data-i18n="appAuto">Auto-detect (community-scripts)</option>
+      <option value="recipe" data-i18n="appRecipeOpt">Host recipe (by name)</option>
+    </select>
+    <input type="text" id="dApp" style="margin-top:.4rem;display:none" data-i18n-ph="appRecipePh" placeholder="recipe name (without .sh)">
     <div class="row" style="margin-top:.7rem"><input type="checkbox" id="dSnap"><label style="margin:0" data-i18n="snapBefore">Snapshot before update</label></div>
+    <div class="row" style="margin-top:.5rem"><input type="checkbox" id="dReboot"><label style="margin:0" data-i18n="autoReboot">Reboot after update if required, then verify it comes back</label></div>
     <label style="margin-top:.7rem"><span data-i18n="retentionTitle">Snapshot retention</span> <span class="muted">(preupd_*)</span></label>
     <div class="grid2">
       <div><label class="thin" data-i18n="keepLbl">Keep newest (0 = unlimited)</label><input type="number" id="dKeep" min="0" value="3"></div>
@@ -275,7 +282,7 @@
     </div>
     <label style="margin-top:.7rem"><span data-i18n="healthTitle">Health-check after update</span> <span class="muted" data-i18n="healthHint">(failure → rollback)</span></label>
     <div class="grid2">
-      <select id="dHcType"><option value="none" data-i18n="hcNone">— none —</option><option value="systemd">systemd is-active</option><option value="http">HTTP curl -f</option></select>
+      <select id="dHcType"><option value="none" data-i18n="hcNone">— none —</option><option value="auto" data-i18n="hcAuto">auto — universal</option><option value="systemd">systemd is-active</option><option value="http">HTTP curl -f</option></select>
       <input type="text" id="dHcArg" data-i18n-ph="hcArgPh" placeholder="nginx | http://127.0.0.1/health">
     </div>
     <hr>
@@ -385,10 +392,12 @@ const I18N={
     noWindows:'no backup window detected',noBackupPlan:'no backup → skipped',blockedNoBackup:'no backup → not touched',
     enabled:'Enabled',schedMode:'Schedule mode',calendar:'Calendar (days/time)',calendarShort:'Calendar',interval:'Interval',
     timeLbl:'Time (HH:MM)',daysLbl:'Days (0=Mon…6=Sun, empty=daily)',daysShort:'Days (empty=daily)',everyMinLbl:'Every N minutes',
-    secPatch:'OS security patches',appRecipe:'App update recipe (name without .sh; empty = none)',
+    secPatch:'OS package updates (apt/apk/pacman upgrade)',
+    appTitle:'Application update',appNone:'— none —',appAuto:'Auto-detect (community-scripts /usr/bin/update)',appRecipeOpt:'Host recipe (by name)',appRecipePh:'recipe name (without .sh)',
+    autoReboot:'Reboot after update if required, then verify it comes back',
     snapBefore:'Snapshot before update',retentionTitle:'Snapshot retention',
     keepLbl:'Keep newest (0 = unlimited)',ageLbl:'Delete older than (days, 0 = off)',
-    healthTitle:'Health-check after update',healthHint:'(failure → rollback)',hcNone:'— none —',hcArgPh:'nginx | http://127.0.0.1/health',
+    healthTitle:'Health-check after update',healthHint:'(failure → rollback)',hcNone:'— none —',hcAuto:'auto — universal (is the container up?)',hcArgPh:'nginx | http://127.0.0.1/health',
     snapSched:'Snapshot schedule',snapHint:'(independent of updates, auto_ prefix)',
     mode:'Mode',prefix:'Prefix',keepShort:'Keep newest',ageShort:'Delete older than (days)',dryrun:'Dry-run',
     cancel:'Cancel',save:'Save',close:'Close',
@@ -419,7 +428,9 @@ const I18N={
     fresh:'fresh',stale:'stale',none:'none',
     wizSchedLead:'I place updates into your maintenance window and skip every backup window. Adjust and press Propose.',
     wizScopeLead:'Default policy applied to enrolled containers with a fresh backup:',
-    wizScopeSec:'OS security patches',wizScopeApp:'App recipe (optional, name without .sh)',wizScopeHc:'Health-check',
+    wizScopeSec:'OS package updates (apt/apk/pacman)',wizScopeApp:'Application update',wizScopeAppNote:'Auto-detect runs each container’s own community-scripts updater; non-helper containers are skipped safely.',
+    wizScopeReboot:'Reboot after update if required (then verify it comes back)',
+    wizScopeHc:'Health-check',wizScopeHcNote:'“auto” is universal — it just checks the container came back up. Set a systemd/HTTP target per machine in Edit if you want a stricter probe.',
     wizNotifLead:'Email reports go through the Proxmox host mail transport (postfix/sendmail) you already configured.',
     wizNotifNote:'Configure recipient + when in host.conf: notify_email, notify_on = always|errors|never. Nothing to enter here.',
     wizApplyDone:'Done — schedule + policy applied. Welcome aboard.',wizApplyPlan:'Apply & finish',wizNoPlan:'Propose a schedule first (step 3).',
@@ -438,10 +449,12 @@ const I18N={
     noWindows:'nie wykryto okna backupu',noBackupPlan:'brak backupu → pominięte',blockedNoBackup:'bez backupu → nie ruszam',
     enabled:'Włączony',schedMode:'Tryb harmonogramu',calendar:'Kalendarz (dni/godzina)',calendarShort:'Kalendarz',interval:'Interwał',
     timeLbl:'Godzina (HH:MM)',daysLbl:'Dni (0=Pn…6=Nd, pusto=codz.)',daysShort:'Dni (pusto=codz.)',everyMinLbl:'Co ile minut',
-    secPatch:'Patche bezpieczeństwa OS',appRecipe:'Recepta aktualizacji aplikacji (nazwa bez .sh; pusto = brak)',
+    secPatch:'Aktualizacje pakietów OS (apt/apk/pacman upgrade)',
+    appTitle:'Aktualizacja aplikacji',appNone:'— brak —',appAuto:'Autowykrywanie (community-scripts /usr/bin/update)',appRecipeOpt:'Recepta hosta (po nazwie)',appRecipePh:'nazwa recepty (bez .sh)',
+    autoReboot:'Restart po aktualizacji jeśli wymagany, z weryfikacją powrotu',
     snapBefore:'Snapshot przed aktualizacją',retentionTitle:'Retencja migawek',
     keepLbl:'Trzymaj ostatnie (0 = bez limitu)',ageLbl:'Kasuj starsze niż (dni, 0 = off)',
-    healthTitle:'Health-check po aktualizacji',healthHint:'(porażka → rollback)',hcNone:'— brak —',hcArgPh:'nginx | http://127.0.0.1/health',
+    healthTitle:'Health-check po aktualizacji',healthHint:'(porażka → rollback)',hcNone:'— brak —',hcAuto:'auto — uniwersalny (czy kontener wstał?)',hcArgPh:'nginx | http://127.0.0.1/health',
     snapSched:'Harmonogram migawek',snapHint:'(niezależny od aktualizacji, prefix auto_)',
     mode:'Tryb',prefix:'Prefix',keepShort:'Trzymaj ostatnie',ageShort:'Kasuj starsze niż (dni)',dryrun:'Dry-run',
     cancel:'Anuluj',save:'Zapisz',close:'Zamknij',
@@ -471,7 +484,9 @@ const I18N={
     fresh:'świeża',stale:'nieświeża',none:'brak',
     wizSchedLead:'Układam aktualizacje w Twoim oknie serwisowym i omijam każde okno backupu. Dostrój i naciśnij Zaproponuj.',
     wizScopeLead:'Domyślna polityka dla włączonych kontenerów ze świeżym backupem:',
-    wizScopeSec:'Patche bezpieczeństwa OS',wizScopeApp:'Recepta aplikacji (opcjonalnie, nazwa bez .sh)',wizScopeHc:'Health-check',
+    wizScopeSec:'Aktualizacje pakietów OS (apt/apk/pacman)',wizScopeApp:'Aktualizacja aplikacji',wizScopeAppNote:'Autowykrywanie uruchamia własny updater community-scripts w kontenerze; kontenery bez niego są bezpiecznie pomijane.',
+    wizScopeReboot:'Restart po aktualizacji jeśli wymagany (z weryfikacją powrotu)',
+    wizScopeHc:'Health-check',wizScopeHcNote:'„auto" jest uniwersalny — sprawdza tylko, czy kontener wstał. Dla ostrzejszej sondy ustaw cel systemd/HTTP per maszyna w Edytuj.',
     wizNotifLead:'Raporty e-mail idą przez pocztę hosta Proxmox (postfix/sendmail), którą już skonfigurowałeś.',
     wizNotifNote:'Odbiorcę i kiedy ustaw w host.conf: notify_email, notify_on = always|errors|never. Tu nic nie wpisujesz.',
     wizApplyDone:'Gotowe — harmonogram + polityka zastosowane. Witaj na pokładzie.',wizApplyPlan:'Zastosuj i zakończ',wizNoPlan:'Najpierw zaproponuj harmonogram (krok 3).',
@@ -618,8 +633,10 @@ function render(){
     const sched=c.mode==='calendar'
       ? `${(c.times||[]).join(',')} · ${(c.weekdays||[]).length?(c.weekdays||[]).map(w=>['Mo','Tu','We','Th','Fr','Sa','Su'][w]).join(','):t('allDays')}`
       : `${c.interval_minutes} min`;
-    const scope=[c.security_patch?'patch':null,c.app_update?('app:'+c.app_update):null].filter(Boolean).join(' + ')||'—';
-    const hc=c.health_check||{};const hcChip=hc.type&&hc.type!=='none'?`<span class="chip idle">${hc.type==='http'?'http':'systemd'}</span>`:'';
+    const scope=[c.security_patch?'OS':null,c.app_update?('app:'+c.app_update):null].filter(Boolean).join(' + ')||'—';
+    const hc=c.health_check||{};
+    const hcChip=hc.type&&hc.type!=='none'?`<span class="chip idle">✔ ${hc.type}</span>`:'';
+    const rebootChip=c.auto_reboot?`<span class="chip idle" title="auto-reboot">⟳</span>`:'';
     const snapsN=g.snapshots!=null?g.snapshots:'—';
     const ret=`keep ${c.keep>0?c.keep:'∞'} · ${snapsN}`;
     const queued=(!g.running&&QMAP[g.vmid])?` <span class="qtag">⏳ ${t('queued')}</span>`:'';
@@ -636,7 +653,7 @@ function render(){
       <td>${backupChip(g)}</td>
       <td><span class="snaps">${ret}</span></td>
       <td>${c.enabled?`<span class="mono">${sched}</span>`:`<span class="muted">${t('disabled')}</span>`}</td>
-      <td><span class="chip idle">${scope}</span> ${hcChip}</td>
+      <td><span class="chip idle">${scope}</span> ${hcChip} ${rebootChip}</td>
       <td>${last}</td>
       <td class="acts">
         <button data-act="snapshot" title="${t('snapNow')}">📷</button>
@@ -726,9 +743,13 @@ function edit(g){
   el('dEnabled').checked=c.enabled;el('dMode').value=c.mode;
   el('dTime').value=(c.times||['03:30'])[0];el('dDays').value=(c.weekdays||[]).join(',');
   el('dInterval').value=c.interval_minutes;el('dSec').checked=c.security_patch;
-  el('dApp').value=c.app_update||'';el('dSnap').checked=c.pre_snapshot;
+  const app=c.app_update;
+  el('dAppMode').value=app==='auto'?'auto':(app?'recipe':'none');
+  el('dApp').value=(app&&app!=='auto')?app:'';
+  el('dSnap').checked=c.pre_snapshot;el('dReboot').checked=!!c.auto_reboot;
   el('dKeep').value=c.keep;el('dAge').value=c.max_age_days;
   const hc=c.health_check||{};el('dHcType').value=hc.type||'none';el('dHcArg').value=hc.arg||'';
+  toggleAppMode();toggleHcArg();
   const s=c.snapshot||{};el('sEnabled').checked=!!s.enabled;el('sMode').value=s.mode||'calendar';
   el('sTime').value=(s.times||['02:00'])[0];el('sDays').value=(s.weekdays||[]).join(',');
   el('sInterval').value=s.interval_minutes||1440;el('sPrefix').value=s.prefix||'auto';
@@ -737,12 +758,17 @@ function edit(g){
 }
 function toggleMode(){const cal=el('dMode').value==='calendar';el('calBox').style.display=cal?'':'none';el('intBox').style.display=cal?'none':'';}
 function toggleSnapMode(){const cal=el('sMode').value==='calendar';el('sCal').style.display=cal?'':'none';el('sInt').style.display=cal?'none':'';}
+function toggleAppMode(){el('dApp').style.display=el('dAppMode').value==='recipe'?'':'none';}
+function toggleHcArg(){const tt=el('dHcType').value;el('dHcArg').style.display=(tt==='systemd'||tt==='http')?'':'none';}
 el('dMode').onchange=toggleMode;el('sMode').onchange=toggleSnapMode;
+el('dAppMode').onchange=toggleAppMode;el('dHcType').onchange=toggleHcArg;
 async function save(vmid){
+  const am=el('dAppMode').value;
+  const app=am==='auto'?'auto':(am==='recipe'?(el('dApp').value.trim()||null):null);
   const body={enabled:el('dEnabled').checked,mode:el('dMode').value,times:[el('dTime').value.trim()],
     weekdays:el('dDays').value.split(',').map(x=>x.trim()).filter(x=>x!=='').map(Number),
     interval_minutes:+el('dInterval').value||10080,security_patch:el('dSec').checked,
-    app_update:el('dApp').value.trim()||null,pre_snapshot:el('dSnap').checked,
+    app_update:app,pre_snapshot:el('dSnap').checked,auto_reboot:el('dReboot').checked,
     keep:Math.max(0,+el('dKeep').value||0),max_age_days:Math.max(0,+el('dAge').value||0),
     health_check:{type:el('dHcType').value,arg:el('dHcArg').value.trim()},
     snapshot:{enabled:el('sEnabled').checked,mode:el('sMode').value,times:[el('sTime').value.trim()],
@@ -773,7 +799,7 @@ el('logRefresh').onclick=loadLog;
 el('logAuto').onchange=()=>el('logAuto').checked?startLogAuto():stopLogAuto();
 
 // ---------- WIZARD ----------
-let WSTEP=1;const WSCOPE={sec:true,app:'',hc:'none'};
+let WSTEP=1;const WSCOPE={sec:true,app:'auto',reboot:false,hc:'auto'};
 el('openWiz').onclick=()=>{WSTEP=1;el('wiz').showModal();renderWiz();};
 el('wizClose').onclick=()=>{localStorage.setItem('au_wizard_done','1');el('wiz').close();};
 el('wizBack').onclick=()=>{if(WSTEP>1){WSTEP--;renderWiz();}};
@@ -827,10 +853,14 @@ function renderWiz(){
   }else if(WSTEP===4){
     b.innerHTML=`<p style="color:var(--ink-dim)">${t('wizScopeLead')}</p>
       <div class="row" style="margin-top:.4rem"><input type="checkbox" id="wSec" ${WSCOPE.sec?'checked':''}><label style="margin:0">${t('wizScopeSec')}</label></div>
-      <label class="thin" style="margin-top:.7rem">${t('wizScopeApp')}</label><input type="text" id="wApp" value="${WSCOPE.app}" placeholder="update">
+      <label class="thin" style="margin-top:.7rem">${t('wizScopeApp')}</label>
+      <select id="wApp"><option value="none">${t('appNone')}</option><option value="auto">${t('appAuto')}</option></select>
+      <p class="note">${t('wizScopeAppNote')}</p>
+      <div class="row" style="margin-top:.5rem"><input type="checkbox" id="wReboot" ${WSCOPE.reboot?'checked':''}><label style="margin:0">${t('wizScopeReboot')}</label></div>
       <label class="thin" style="margin-top:.7rem">${t('wizScopeHc')}</label>
-      <select id="wHc"><option value="none">${t('hcNone')}</option><option value="systemd">systemd is-active</option><option value="http">HTTP curl -f</option></select>`;
-    el('wHc').value=WSCOPE.hc;
+      <select id="wHc"><option value="none">${t('hcNone')}</option><option value="auto">${t('hcAuto')}</option></select>
+      <p class="note">${t('wizScopeHcNote')}</p>`;
+    el('wApp').value=WSCOPE.app;el('wHc').value=WSCOPE.hc;
   }else if(WSTEP===5){
     b.innerHTML=`<p style="color:var(--ink-dim)">${t('wizNotifLead')}</p><div class="prop"><div class="note">${t('wizNotifNote')}</div></div>
       ${!PLAN||!PLAN.plan.length?`<p class="note" style="color:var(--warn)">${t('wizNoPlan')}</p>`:''}`;
@@ -839,7 +869,8 @@ function renderWiz(){
 async function wizFinish(){
   // capture scope choices from step 4 if present
   if(el('wSec'))WSCOPE.sec=el('wSec').checked;
-  if(el('wApp'))WSCOPE.app=el('wApp').value.trim();
+  if(el('wApp'))WSCOPE.app=el('wApp').value;
+  if(el('wReboot'))WSCOPE.reboot=el('wReboot').checked;
   if(el('wHc'))WSCOPE.hc=el('wHc').value;
   if(!PLAN||!PLAN.plan.length){alert(t('wizNoPlan'));WSTEP=3;renderWiz();return;}
   await applyPlan(PLAN);
@@ -849,7 +880,8 @@ async function wizFinish(){
     const g=(DATA.guests||[]).find(x=>x.vmid===it.vmid);const cur=g?g.config:{};
     await fetch('/api/guests/'+it.vmid,{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({...cur,enabled:true,mode:'calendar',times:[it.time],weekdays:[PLAN.weekday],
-        security_patch:WSCOPE.sec,app_update:WSCOPE.app||null,pre_snapshot:true,
+        security_patch:WSCOPE.sec,app_update:WSCOPE.app==='auto'?'auto':null,pre_snapshot:true,
+        auto_reboot:WSCOPE.reboot,
         health_check:{type:WSCOPE.hc,arg:(cur.health_check||{}).arg||''},force:true})});
   }
   localStorage.setItem('au_wizard_done','1');

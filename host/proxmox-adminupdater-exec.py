@@ -97,7 +97,20 @@ def _safe_name(app):
     return bool(app) and all(c.isalnum() or c in "-._" for c in app) and app[0].isalnum()
 
 
-def build_app_update(cfg, ctid, app):
+def build_app_update(cfg, ctid, app, distro="debian"):
+    # "auto" = community-scripts behaviour: run the container's own /usr/bin/update
+    # helper (present in helper-script CTs). Faithful to tools/pve/update-apps.sh:
+    # PHS_SILENT=1 for unattended, TERM=dumb + a no-op `clear` on PATH (no TTY),
+    # and a clean skip (exit 0) when the CT is not a helper-script container.
+    if app == "auto":
+        shell = "ash" if distro == "alpine" else "bash"
+        script = (
+            "command -v update >/dev/null 2>&1 || "
+            "{ echo 'brak /usr/bin/update — nie jest to kontener community-scripts, pomijam'; exit 0; }; "
+            "mkdir -p /tmp/.nc; printf '#!/bin/sh\\n:\\n' > /tmp/.nc/clear; chmod +x /tmp/.nc/clear; "
+            "export PATH=/tmp/.nc:$PATH; export TERM=dumb; export PHS_SILENT=1; update"
+        )
+        return [shell, "-lc", script]
     if not _safe_name(app):
         return None
     recipe = os.path.join(cfg["recipes_dir"], f"{app}.sh")
@@ -120,6 +133,26 @@ def snapshot(ctid, prefix):
 def rollback(ctid, snap, timeout):
     rc, _ = run(["pct", "rollback", str(ctid), snap], timeout)
     return rc == 0
+
+
+def reboot_and_verify(ctid, timeout, wait=150):
+    """Reboot a container and confirm it comes back and is responsive. Returns
+    (ok, log). Used after an update when the guest opted into auto-reboot AND the
+    update left /var/run/reboot-required. If it never returns, the caller rolls
+    back — so a wedged reboot is caught, not left broken."""
+    t0 = time.time()
+    rc, out = run(["pct", "reboot", str(ctid)], timeout)
+    if rc != 0:  # some setups need an explicit stop/start
+        run(["pct", "stop", str(ctid)], timeout)
+        run(["pct", "start", str(ctid)], timeout)
+    deadline = time.time() + wait
+    while time.time() < deadline:
+        if "running" in _sh(["pct", "status", str(ctid)], 15):
+            rc2, _ = run(["pct", "exec", str(ctid), "--", "true"], 30)
+            if rc2 == 0:
+                return True, f"restart OK, wrócił po {int(time.time() - t0)}s"
+        time.sleep(3)
+    return False, f"kontener nie wrócił po restarcie w {wait}s"
 
 
 def _snap_epoch(name):
@@ -187,7 +220,19 @@ def build_health_check(hc):
     type+arg. No raw command string ever crosses from the LXC."""
     t = (hc or {}).get("type", "none")
     arg = str((hc or {}).get("arg", "")).strip()
-    if t == "none" or not arg:
+    if t == "none":
+        return None
+    if t == "auto":
+        # Universal, no-arg liveness probe that fits ANY LXC: if the guest runs
+        # systemd, its system state must not be failed/offline; otherwise just
+        # require a live init (PID 1). Covers both worlds so one setting works
+        # fleet-wide — passes if the box is up, whichever init it uses.
+        return ["bash", "-lc",
+                "if command -v systemctl >/dev/null 2>&1; then "
+                "case \"$(systemctl is-system-running 2>/dev/null)\" in "
+                "running|degraded|starting|initializing|maintenance) exit 0;; *) exit 1;; esac; "
+                "else [ -d /proc/1 ]; fi"]
+    if not arg:
         return None
     if t == "systemd":
         if not re.match(r"^[A-Za-z0-9@._:-]+$", arg):
@@ -301,7 +346,7 @@ def do_job(cfg, job):
         if action == "security-patch":
             cmd = build_security_patch(distro)
         elif action == "app-update":
-            cmd = build_app_update(cfg, ctid, str(job.get("app", "")))
+            cmd = build_app_update(cfg, ctid, str(job.get("app", "")), distro)
         else:
             cmd = None
         if cmd is None:
@@ -315,7 +360,21 @@ def do_job(cfg, job):
             res["status"] = _rollback_verdict(snap, job, ctid, cfg["timeout"])
             return res  # stop the chain; the snapshot is the safety net
 
-    # 4) post-update health-check — verify the guest actually works. A failing
+    # 4) optional post-update reboot — ONLY if the guest opted in AND the update
+    # actually left /var/run/reboot-required (community-scripts convention). Verify
+    # the container comes back; if not, roll back to the pre-update snapshot.
+    if job.get("auto_reboot") and overall == "ok":
+        rc, _ = run(["pct", "exec", str(ctid), "--",
+                     "test", "-e", "/var/run/reboot-required"], 30)
+        if rc == 0:
+            ok, rlog = reboot_and_verify(ctid, cfg["timeout"])
+            res["steps"].append({"action": "reboot", "status": ("ok" if ok else "failed"),
+                                 "rc": 0 if ok else -1, "log": rlog})
+            if not ok:
+                res["status"] = _rollback_verdict(snap, job, ctid, cfg["timeout"])
+                return res
+
+    # 5) post-update health-check — verify the guest actually works. A failing
     # probe fails the run (and rolls back) even though apt/apk returned 0.
     hcmd = build_health_check(job.get("health_check"))
     if hcmd:
