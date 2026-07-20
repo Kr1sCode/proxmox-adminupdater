@@ -26,6 +26,13 @@ health-check and post-update reboot.
 
 ![LXC machines](docs/dashboard-machines.png)
 
+**Notifications** — pick when to send (every run / only failures / never), the
+grouping (one digest per service window, or one e-mail per machine) and the format
+(HTML or plain text), with a live preview and a one-click **Send test**. Delivery
+rides your Proxmox mail transport — the SMTP server and credentials stay on the host.
+
+![Notifications](docs/notifications.png)
+
 > Screenshots use anonymized demo data.
 
 ## Why the split brain (and why there IS a host component)
@@ -143,10 +150,16 @@ ones: a compromised LXC can *request*, never *force*.
 
 ## Email report (via the Proxmox host's mail)
 
-After each run the host executor can send a styled **HTML report** (per guest:
-snapshot, steps, status, pruned) through the **host's own mail transport**
-(Proxmox postfix/`sendmail` — set up notifications on the host as usual). Configure
-in `host.conf`: `notify_email`, `notify_on = always|errors|never`.
+After each run the host executor sends a report through the **host's own mail
+transport** — it reuses the SMTP target you configured in Proxmox (Datacenter →
+Notifications), so credentials are never entered twice and never live in the panel.
+
+Everything else is set from the **Notifications** tab in the UI: **when** (every run
+/ only on failure+rollback / never), **grouping** (one digest per service window, or
+one e-mail per machine), **format** (styled **HTML** or **plain text**), an optional
+recipient override, a live preview and a **Send test** button. The executor picks
+these up on its next tick. (`host.conf` `notify_email` / `notify_on` still work as a
+fallback if the panel leaves them at defaults.)
 
 ## App recipes
 
