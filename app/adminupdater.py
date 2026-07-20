@@ -142,6 +142,7 @@ def record_report(results):
         else:
             entry["last_run"] = now
             entry["last"] = rec
+        entry.pop("running", None)   # a finished report clears the spinner
         entry.setdefault("history", [])
         entry["history"] = ([rec] + entry["history"])[:30]
         state[vmid] = entry
@@ -153,18 +154,37 @@ def record_report(results):
     return {"recorded": len(results)}
 
 
+RUNNING_STALE = 2 * 3600   # a "running" marker older than this is treated as dead
+
+
+def set_running(ctid, kind):
+    """Mark a guest as currently being processed by the host executor (drives the
+    UI spinner). Cleared by the matching report, or aged out after RUNNING_STALE."""
+    state = core.load_state()
+    vmid = str(ctid)
+    entry = state.get(vmid, {})
+    entry["running"] = {"kind": kind, "since": int(time.time())}
+    state[vmid] = entry
+    core.save_state(state)
+    return {"ok": True}
+
+
 def guest_view():
-    """UI helper: merge API guest list with config + last report."""
+    """UI helper: merge API guest list with config + last report + running flag."""
     cfg = core.load_config()
     pve = core.PVE(cfg["settings"])
     idx = core.guest_index(pve, lxc_only=True)
     state = core.load_state()
+    now = int(time.time())
     out = []
     for vmid, meta in sorted(idx.items(), key=lambda kv: int(kv[0])):
         st = state.get(vmid, {})
+        run = st.get("running")
+        running = run if (run and now - int(run.get("since", 0)) < RUNNING_STALE) else None
         out.append({"vmid": int(vmid), "name": meta["name"], "status": meta["status"],
                     "config": guest_settings(cfg, vmid),
-                    "report": st.get("last"), "report_snap": st.get("last_snap")})
+                    "report": st.get("last"), "report_snap": st.get("last_snap"),
+                    "running": running})
     return {"settings": cfg["settings"], "guests": out}
 
 

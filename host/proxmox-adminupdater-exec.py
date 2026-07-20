@@ -346,13 +346,25 @@ def maybe_notify(cfg, results):
         print(f"raport e-mail wysłany do {cfg['notify_email']}")
 
 
+def ping_progress(cfg, job):
+    """Best-effort: tell the LXC we're starting this guest (drives the spinner)."""
+    try:
+        http(cfg, "/progress", "POST",
+             {"ctid": int(job["ctid"]), "kind": job.get("kind", "update")})
+    except Exception:  # noqa: BLE001 - a failed ping must never block the run
+        pass
+
+
 def main():
     cfg = load_cfg()
     jobs = http(cfg, "/plan").get("jobs", [])
     if not jobs:
         print("nic do zrobienia")
         return
-    results = [do_job(cfg, j) for j in jobs]
+    results = []
+    for j in jobs:
+        ping_progress(cfg, j)
+        results.append(do_job(cfg, j))
     http(cfg, "/report", "POST", {"results": results})
     maybe_notify(cfg, results)
     bad = [r for r in results if r["status"] not in GOOD]

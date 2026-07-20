@@ -87,7 +87,7 @@ def _guard():
         return (jsonify({"error": "setup required"}), 503) if p.startswith("/api/") \
             else redirect("/setup")
     # host executor endpoints: bearer auth enforced in the handlers
-    if p in ("/plan", "/report"):
+    if p in ("/plan", "/report", "/progress"):
         return None
     if p == "/login" or p.startswith("/api/login"):
         return None
@@ -231,6 +231,18 @@ def api_report():
     if not isinstance(results, list):
         return jsonify({"error": "results must be a list"}), 400
     return jsonify(up.record_report(results))
+
+
+@app.route("/progress", methods=["POST"])
+def api_progress():
+    if not _bearer_ok(request):
+        return jsonify({"error": "unauthorized"}), 401
+    body = request.get_json(force=True, silent=True) or {}
+    try:
+        ctid = int(body["ctid"])
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"error": "ctid required"}), 400
+    return jsonify(up.set_running(ctid, str(body.get("kind", "update"))))
 
 
 @app.route("/api/health")

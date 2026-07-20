@@ -3,9 +3,10 @@ Description=proxmox-adminupdater heartbeat (the LXC decides what is actually due
 
 [Timer]
 # The LXC computes "due" per guest schedule; this timer is just the resolution.
-OnBootSec=5min
-OnUnitActiveSec=15min
-RandomizedDelaySec=3min
+# Keep the period well under core.CALENDAR_FIRST_GRACE so no scheduled time is missed.
+OnBootSec=2min
+OnUnitActiveSec=5min
+RandomizedDelaySec=1min
 Persistent=true
 
 [Install]

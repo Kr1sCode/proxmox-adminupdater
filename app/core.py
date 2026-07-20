@@ -187,12 +187,18 @@ def next_occurrence(g, now_ts):
     return int(best) if best else None
 
 
+# First-run catch-up window for calendar mode. MUST exceed the host timer period
+# (else a scheduled time can fall in the gap between this window and the next tick
+# and never fire, leaving last_run at 0 forever). Timer runs every ~5 min.
+CALENDAR_FIRST_GRACE = 1800  # 30 min
+
+
 def is_due(g, last_run, now_ts):
     if g.get("mode") == "calendar":
         times, weekdays = g.get("times") or [], g.get("weekdays") or []
         if not times:
             return False
-        window_start = last_run if last_run else now_ts - 600
+        window_start = last_run if last_run else now_ts - CALENDAR_FIRST_GRACE
         now = dt.datetime.fromtimestamp(now_ts)
         for day in range(-2, 1):
             d = (now + dt.timedelta(days=day)).date()

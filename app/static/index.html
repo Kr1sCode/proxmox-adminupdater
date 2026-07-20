@@ -28,6 +28,9 @@
   th{font-size:.78rem;text-transform:uppercase;letter-spacing:.03em;color:var(--muted)}
   .tag{font-size:.75rem;padding:.1rem .5rem;border-radius:99px;border:1px solid var(--bd)}
   .ok{color:#22c55e}.bad{color:#ef4444}.muted{color:var(--muted)}
+  .spin{display:inline-block;width:13px;height:13px;border:2px solid var(--bd);border-top-color:var(--accent);border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  tr.running{background:color-mix(in srgb,var(--accent) 8%,transparent)}
   pre#logbox{margin:0;padding:.8rem 1rem;font:12.5px/1.5 ui-monospace,monospace;white-space:pre-wrap;word-break:break-word}
   dialog{border:1px solid var(--bd);border-radius:12px;padding:1.2rem;max-width:460px;width:92%;max-height:88vh;overflow-y:auto;color:var(--fg);background:var(--card)}
   dialog hr{border:0;border-top:1px solid var(--bd);margin:1rem 0}
@@ -188,11 +191,13 @@ el('themeBtn').onclick=()=>applyTheme(document.documentElement.getAttribute('dat
 applyTheme(localStorage.getItem('au_theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'));
 
 // ---- tabs ----
-let logTimer=null;
+let logTimer=null, guestsTimer=null;
+function startGuestsAuto(){stopGuestsAuto();guestsTimer=setInterval(()=>{if(!el('dlg').open)load();},5000);}
+function stopGuestsAuto(){if(guestsTimer){clearInterval(guestsTimer);guestsTimer=null;}}
 document.querySelectorAll('nav .tab').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('nav .tab').forEach(x=>x.classList.toggle('active',x===b));
   document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('active',p.id==='pane-'+b.dataset.tab));
-  if(b.dataset.tab==='log'){loadLog();startLogAuto();} else stopLogAuto();
+  if(b.dataset.tab==='log'){stopGuestsAuto();loadLog();startLogAuto();} else {stopLogAuto();load();startGuestsAuto();}
 });
 
 // ---- guests ----
@@ -208,8 +213,11 @@ async function load(){
     const scope=[c.security_patch?'patch':null,c.app_update?('app:'+c.app_update):null].filter(Boolean).join(' + ')||'—';
     const snapOn=c.snapshot&&c.snapshot.enabled;
     const ret=`${c.keep>0?('keep '+c.keep):'∞'}${c.max_age_days>0?(' · '+c.max_age_days+'d'):''}${snapOn?` · 📷 ${c.snapshot.prefix}${c.snapshot.dryrun?' (dry)':''}`:''}`;
-    const last=r?`<span class="${r.status==='ok'?'ok':'bad'}">${r.status}</span> <span class="muted">${(r.ts||'').slice(0,16).replace('T',' ')}</span>`:'<span class="muted">—</span>';
+    const last=g.running
+      ? `<span class="spin"></span> <span class="muted">${g.running.kind}…</span>`
+      : (r?`<span class="${r.status==='ok'?'ok':'bad'}">${r.status}</span> <span class="muted">${(r.ts||'').slice(0,16).replace('T',' ')}</span>`:'<span class="muted">—</span>');
     const tr=document.createElement('tr');
+    if(g.running) tr.className='running';
     tr.innerHTML=`<td>${g.vmid}</td><td>${g.name||''}</td>
       <td><span class="tag">${g.status}</span></td>
       <td>${c.enabled?sched:'<span class="muted">'+t('disabled')+'</span>'}</td>
@@ -275,6 +283,7 @@ el('logRefresh').onclick=loadLog;
 el('logAuto').onchange=()=>el('logAuto').checked?startLogAuto():stopLogAuto();
 
 applyLang(LANG);
+startGuestsAuto();
 </script>
 </body>
 </html>
