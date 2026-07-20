@@ -403,15 +403,16 @@ def _in_zone(minute, zones):
 
 def forbidden_zones(cfg, inv, weekday):
     """Minute ranges where NOTHING may be scheduled: every detected backup window
-    (daily, PBS + built-in vzdump alike) + the host-update slot on its weekday."""
+    (daily, PBS + built-in vzdump alike) + the host-update slot. The host update
+    is treated as an anchor to avoid REGARDLESS of its weekday — even if the host
+    updates on a different day than the LXC window, we keep that clock slot clear
+    so the two never line up (the user's second pillar next to the backup)."""
     zones = [(int(w["start_min"]), int(w["end_min"])) for w in inv.get("windows", [])]
     hu = host_update_settings(cfg)
     if hu.get("enabled") and hu.get("mode") == "calendar":
-        wds = hu.get("weekdays") or list(range(7))
-        if weekday in wds:
-            hs = _hhmm((hu.get("times") or ["02:00"])[0])
-            if hs is not None:
-                zones.append((hs, (hs + 30) % 1440))
+        hs = _hhmm((hu.get("times") or ["02:00"])[0])
+        if hs is not None:
+            zones.append((hs, (hs + 30) % 1440))
     return zones
 
 

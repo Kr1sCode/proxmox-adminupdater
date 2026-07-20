@@ -78,6 +78,12 @@ DISK="${AU_DISK:-$DEF_DISK}";      CORES="${AU_CORES:-$DEF_CORES}"
 RAM="${AU_RAM:-$DEF_RAM}";         STORE="${AU_STORE:-$DEF_STORE}"
 BRIDGE="${AU_BRIDGE:-$DEF_BRIDGE}"; DNS="${AU_NS:-}"; NESTING="${AU_NESTING:-1}"
 ALLOW_ALL="${AU_ALLOW_ALL:-0}"           # 1 = host.conf allowed_ctids = * (trust panel)
+# timezone: schedules are computed in the CONTAINER's local time, so it must match
+# the host (backup windows are learned host-side). Default to the host's own zone.
+DEF_TZ="$(timedatectl show --value -p Timezone 2>/dev/null || cat /etc/timezone 2>/dev/null \
+         || { readlink -f /etc/localtime 2>/dev/null | sed 's#.*/zoneinfo/##'; } || echo UTC)"
+[ -n "$DEF_TZ" ] || DEF_TZ="UTC"
+TZONE="${AU_TZ:-$DEF_TZ}"
 # IPv4: parse AU_NET ("dhcp" | "CIDR,gw=GW")
 IP4MODE="dhcp"; IP4=""; GW=""
 if [ -n "${AU_NET:-}" ] && [ "${AU_NET}" != "dhcp" ]; then
@@ -156,6 +162,17 @@ elif [ "$WIZARD" = "text" ]; then
   a="$(ask 'Utworzyć kontener? [T/n]:')"; [ "${a,,}" = n ] && die "anulowano przez użytkownika"
 fi
 
+# ---------- timezone (always asked; must match the host) ----------
+if [ "$WIZARD" = "whiptail" ]; then
+  TZONE=$(wt_input "Strefa czasowa kontenera (harmonogramy liczone wg niej; musi zgadzać się z hostem):" "$TZONE") || die "anulowano"
+elif [ "$WIZARD" = "text" ]; then
+  TZONE="$(tx 'Strefa czasowa (np. Europe/Warsaw)' "$TZONE")"
+fi
+if [ ! -e "/usr/share/zoneinfo/$TZONE" ]; then
+  warn "nieznana strefa '$TZONE' — używam strefy hosta ($DEF_TZ)"; TZONE="$DEF_TZ"
+fi
+info "Strefa czasowa kontenera: ${TZONE}"
+
 # ---------- validate ----------
 [[ "$CTID" =~ ^[0-9]+$ ]] || die "CTID musi być liczbą: $CTID"
 if pct status "$CTID" >/dev/null 2>&1 || qm status "$CTID" >/dev/null 2>&1; then
@@ -233,13 +250,16 @@ fi
 
 # ---------- install brain inside container ----------
 info "Instaluję aplikację w kontenerze…"
-pct exec "$CTID" -- bash -s -- "$REPO" "$BRANCH" "$PVE_HOST" "adminupdater@pve!exec=${TOKVAL}" <<'INNER'
+pct exec "$CTID" -- bash -s -- "$REPO" "$BRANCH" "$PVE_HOST" "adminupdater@pve!exec=${TOKVAL}" "$TZONE" <<'INNER'
 set -euo pipefail
-REPO="$1"; BRANCH="$2"; PVE_HOST="$3"; TOKEN="$4"
+REPO="$1"; BRANCH="$2"; PVE_HOST="$3"; TOKEN="$4"; TZONE="${5:-UTC}"
 export DEBIAN_FRONTEND=noninteractive
 apt-get -o Acquire::ForceIPv4=true -qq update >/dev/null
 apt-get -o Acquire::ForceIPv4=true -qq install -y curl python3 python3-flask python3-requests python3-gunicorn >/dev/null
-ln -sf /usr/share/zoneinfo/$(cat /etc/timezone 2>/dev/null || echo UTC) /etc/localtime 2>/dev/null || true
+# set the container timezone so is_due matches the admin's wall clock
+if [ -e "/usr/share/zoneinfo/$TZONE" ]; then
+  ln -sf "/usr/share/zoneinfo/$TZONE" /etc/localtime; echo "$TZONE" > /etc/timezone
+fi
 
 mkdir -p /opt/adminupdater /etc/adminupdater /var/lib/adminupdater /var/log/adminupdater
 tmp=$(mktemp -d)

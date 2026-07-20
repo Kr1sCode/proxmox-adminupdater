@@ -643,10 +643,14 @@ function renderGantt(d){
   el('ribbonHint').textContent=(inv.windows&&inv.windows.length)?t('ribbonHint'):'— '+t('noWindows');
 
   // backup windows drawn as faint full-height bands inside EVERY track (aligned columns)
-  const bands=(inv.windows||[]).filter(w=>inAxis(w.start_min)||inAxis(w.end_min)).map(w=>{
+  const hostM=(HU.enabled&&HU.mode==='calendar')?hhmmToMin((HU.times||['02:00'])[0]):null;
+  // faint aligned columns drawn in EVERY row: the two anchors to avoid — each
+  // detected backup window (red) and the host-update slot (amber).
+  let bands=(inv.windows||[]).filter(w=>inAxis(w.start_min)||inAxis(w.end_min)).map(w=>{
     const l=ribPct(w.start_min), width=Math.max(1.5,Math.min(mPct((((w.end_min-w.start_min)%1440)+1440)%1440),100-l));
     return `<div class="gband backup" style="left:${l}%;width:${width}%"></div>`;
   }).join('');
+  if(hostM!=null&&inAxis(hostM))bands+=`<div class="gband hostzone" style="left:${ribPct(hostM)}%;width:${Math.max(3,mPct(30))}%"></div>`;
   const track=inner=>`<div class="gtrack">${bands}${inner}</div>`;
 
   let html='';
@@ -657,7 +661,6 @@ function renderGantt(d){
             :`<span class="gempty">${t('noWindows')}</span>`)+`</div>`;
 
   // --- anchor row 2: the host update ---
-  const hostM=(HU.enabled&&HU.mode==='calendar')?hhmmToMin((HU.times||['02:00'])[0]):null;
   html+=`<div class="grow ref"><div class="glabel"><span class="nm">🛡 ${t('ganttHostRow')}</span><span class="day">${hostM!=null?wdList(HU.weekdays||[]):t('ganttNoSched')}</span></div>`+
     track((hostM!=null&&inAxis(hostM))?`<div class="gbar hostu" style="left:${ribPct(hostM)}%;width:${Math.max(6,mPct(30))}%">${fmtMin(hostM)}</div>`
             :`<span class="gempty">${t('ganttNoSched')}</span>`)+`</div>`;
