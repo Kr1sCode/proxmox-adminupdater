@@ -345,8 +345,14 @@
 <!-- WIZARD -->
 <dialog id="wiz">
   <div class="dlg-head">
-    <div class="eyebrow" data-i18n="wizEyebrow">Wizard · first run</div>
-    <h3 style="margin-top:6px" data-i18n="wizTitle">Let's schedule safe updates for your fleet</h3>
+    <div style="display:flex;align-items:flex-start;gap:10px">
+      <div style="flex:1">
+        <div class="eyebrow" data-i18n="wizEyebrow">Wizard · first run</div>
+        <h3 style="margin-top:6px" data-i18n="wizTitle">Let's schedule safe updates for your fleet</h3>
+      </div>
+      <button class="chipbtn" id="wizLang"></button>
+      <button class="chipbtn" id="wizTheme">◐</button>
+    </div>
     <div class="steps" id="wizSteps"></div>
   </div>
   <div class="dlg-body" id="wizBody"></div>
@@ -475,12 +481,15 @@ let LANG=localStorage.getItem('au_lang')||'en';
 const t=(k,vars)=>{let s=(I18N[LANG]&&I18N[LANG][k])||I18N.en[k]||k;if(vars)for(const v in vars)s=s.replace('{'+v+'}',vars[v]);return s;};
 function applyLang(l){
   LANG=l;localStorage.setItem('au_lang',l);document.documentElement.lang=l;
-  el('langBtn').innerHTML=l==='en'?'<b>EN</b>&nbsp;/&nbsp;PL':'EN&nbsp;/&nbsp;<b>PL</b>';
+  const langLbl=l==='en'?'<b>EN</b>&nbsp;/&nbsp;PL':'EN&nbsp;/&nbsp;<b>PL</b>';
+  el('langBtn').innerHTML=langLbl;el('wizLang').innerHTML=langLbl;
   document.querySelectorAll('[data-i18n]').forEach(n=>n.textContent=t(n.dataset.i18n));
   document.querySelectorAll('[data-i18n-ph]').forEach(n=>n.placeholder=t(n.dataset.i18nPh));
   render();if(el('wiz').open)renderWiz();
 }
 el('langBtn').onclick=()=>applyLang(LANG==='en'?'pl':'en');
+el('wizLang').onclick=()=>applyLang(LANG==='en'?'pl':'en');
+el('wizTheme').onclick=()=>applyTheme(document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark');
 
 // ---------- theme ----------
 function applyTheme(th){document.documentElement.setAttribute('data-theme',th);localStorage.setItem('au_theme',th);
