@@ -75,6 +75,11 @@ def _bearer_ok(req):
     return bool(want) and hmac.compare_digest(got, want)
 
 
+def _audit(msg):
+    """Append an audit line to the shared log, tagged with the acting user."""
+    core.log(f"[audit] {session.get('user', '?')}: {msg}")
+
+
 @app.before_request
 def _guard():
     p = request.path
@@ -150,6 +155,7 @@ def api_login():
         return jsonify({"error": "invalid credentials"}), 401
     session.permanent = True
     session["user"] = user
+    _audit(f"zalogowano z {ip}")
     return jsonify({"ok": True, "user": user})
 
 
@@ -200,6 +206,11 @@ def api_guest_save(vmid):
                 }), 409
     cfg.setdefault("guests", {})[str(vmid)] = g
     core.save_config(cfg)
+    _audit(f"CT {vmid} polityka zapisana: enabled={g['enabled']} mode={g['mode']} "
+           f"times={g.get('times')} weekdays={g.get('weekdays')} interval={g.get('interval_minutes')} "
+           f"patch={g['security_patch']} app={g.get('app_update')} reboot={g.get('auto_reboot')} "
+           f"health={g.get('health_check', {}).get('type')} keep={g.get('keep')} "
+           f"max_age={g.get('max_age_days')} snap={bool((g.get('snapshot') or {}).get('enabled'))}")
     return jsonify({"ok": True, "config": g})
 
 
@@ -212,13 +223,17 @@ def api_schedule_propose():
 def api_schedule_apply():
     body = request.get_json(force=True) or {}
     applied = up.apply_schedule(body.get("plan"), body.get("weekday", 6))
+    _audit(f"harmonogram zastosowany do {len(applied)} maszyn (weekday={body.get('weekday', 6)}): {applied}")
     return jsonify({"ok": True, "applied": applied})
 
 
 @app.route("/api/maintenance", methods=["POST"])
 def api_maintenance():
     body = request.get_json(force=True) or {}
-    return jsonify({"ok": True, "maintenance": up.save_maintenance(body)})
+    m = up.save_maintenance(body)
+    _audit(f"okno serwisowe: {m['window_start']}–{m['window_end']} weekday={m['weekdays']} "
+           f"spacing={m['spacing_min']} concurrency={m['concurrency']}")
+    return jsonify({"ok": True, "maintenance": m})
 
 
 _ACTIONS = ("snapshot", "purge", "update")
@@ -237,6 +252,8 @@ def api_actions():
     if not vmids:
         return jsonify({"error": "no vmids"}), 400
     qids, skipped = up.enqueue_actions(action, vmids)
+    _audit(f"akcja ad-hoc '{action}' zakolejkowana dla {len(qids)} maszyn (vmids={vmids}"
+           + (f", pominięto={skipped}" if skipped else "") + ")")
     return jsonify({"ok": True, "queued": len(qids), "skipped": skipped})
 
 
@@ -254,6 +271,8 @@ def api_settings():
         if k in body:
             cfg["settings"][k] = body[k]
     core.save_config(cfg)
+    _audit("ustawienia globalne: " + ", ".join(f"{k}={cfg['settings'].get(k)}" for k in body
+                                               if k in cfg["settings"]))
     return jsonify({"ok": True, "settings": cfg["settings"]})
 
 
@@ -268,16 +287,24 @@ def api_host_update():
             hu[k] = body[k]
     cfg["host_update"] = hu
     core.save_config(cfg)
+    _audit(f"aktualizacja hosta: enabled={hu['enabled']} mode={hu['mode']} "
+           f"times={hu.get('times')} weekdays={hu.get('weekdays')} interval={hu.get('interval_minutes')}")
     return jsonify({"ok": True, "host_update": hu})
 
 
 @app.route("/api/log")
 def api_log():
     try:
+        n = int(request.args.get("lines", 200))
+    except (TypeError, ValueError):
+        n = 200
+    n = max(50, min(n, 5000))   # clamp to a sane range
+    try:
         with open(core.LOG_PATH) as f:
-            return jsonify({"log": "".join(f.readlines()[-200:])})
+            lines = f.readlines()
+        return jsonify({"log": "".join(lines[-n:]), "total": len(lines), "shown": min(n, len(lines))})
     except OSError:
-        return jsonify({"log": ""})
+        return jsonify({"log": "", "total": 0, "shown": 0})
 
 
 # ---- host executor: bearer-authed plan / report ---------------------------
