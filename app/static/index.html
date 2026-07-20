@@ -155,7 +155,11 @@
         background:var(--surface-2);color:inherit;font:inherit;width:100%}
   input[type=checkbox]{accent-color:var(--accent)}
 
-  /* wizard */
+  /* wizard: wide + fixed height so it never re-centres between steps, single scroll */
+  #wiz{max-width:min(1040px,92vw);width:90vw}
+  #wiz[open]{display:flex;flex-direction:column;height:84vh;max-height:84vh}
+  #wiz .dlg-head,#wiz .dlg-foot{flex:none}
+  #wiz .dlg-body{flex:1 1 auto;min-height:0;max-height:none;overflow-y:auto}
   .steps{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap}
   .step{font-family:var(--mono);font-size:11px;padding:5px 10px;border-radius:99px;border:1px solid var(--border);color:var(--ink-mute)}
   .step.on{background:var(--accent);border-color:var(--accent);color:#04121f;font-weight:650}
