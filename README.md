@@ -10,6 +10,24 @@ community-scripts "update" step, fleet-wide, without touching each guest by hand
 Sibling project to [`proxmox-autosnap`](https://github.com/Kr1sCode/proxmox-autosnap);
 it reuses the same config/schedule/UI lineage.
 
+## Screenshots
+
+**Service window** — the mission-control view. The two schedule anchors (the daily
+backup window in red, the PVE host update in amber) are drawn across every row, and
+each LXC is laid out around them: a per-machine timeline showing the pre-update
+snapshot → update → prune, its time and retention. EN/PL and light/dark built in.
+
+![Service window](docs/dashboard-service-window.png)
+
+**LXC machines** — the fleet table: per-guest backup freshness, snapshot count,
+update scope + health-check, and one-click Snapshot / Update / Purge / Edit. The
+example below shows a container using auto app-update (`app:auto`) with an auto
+health-check and post-update reboot.
+
+![LXC machines](docs/dashboard-machines.png)
+
+> Screenshots use anonymized demo data.
+
 ## Why the split brain (and why there IS a host component)
 
 Proxmox exposes **no REST API to run a command inside an LXC** — the guest-agent
@@ -157,4 +175,10 @@ install.sh · uninstall.sh · config/config.example.json
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+**Free for non-commercial / homelab use** — see [LICENSE](LICENSE).
+
+You may use, run, modify and share adminupdater for any non-commercial purpose:
+personal use, your own homelab, hobby, research, education and evaluation.
+**Commercial use** (inside a for-profit organisation's operations, or to provide a
+paid product/service) requires a separate commercial licence from the author —
+open an issue on this repository to arrange one.

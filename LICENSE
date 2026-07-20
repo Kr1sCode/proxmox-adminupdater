@@ -1,21 +1,73 @@
-MIT License
+adminupdater Non-Commercial License (Homelab-Free)
+Version 1.0 — 2026
 
 Copyright (c) 2026 Kr1sCode
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+------------------------------------------------------------------------
+Summary (non-binding)
+------------------------------------------------------------------------
+Free to use, run, copy, modify and share for ANY non-commercial purpose —
+including personal use, your own homelab, hobby, research, education and
+evaluation. Using it commercially (to make money, or inside a for-profit
+organisation's operations) requires a separate commercial licence from the
+copyright holder. The binding terms are below.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+------------------------------------------------------------------------
+Terms
+------------------------------------------------------------------------
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+1. Definitions.
+   "Software" means this software and all accompanying files in this
+   repository. "You" means the individual or entity exercising the
+   permissions granted here.
+
+   "Non-Commercial Use" means any use that is not primarily intended for or
+   directed toward commercial advantage or monetary compensation. Running the
+   Software in your personal capacity or in a private homelab, and use for
+   personal, educational, academic, research, or evaluation purposes, is
+   Non-Commercial Use — even if you happen to be employed elsewhere.
+
+   "Commercial Use" means any use that is NOT Non-Commercial Use, including
+   use in the internal business operations of a for-profit entity, use to
+   provide a paid product or service, or hosting the Software for third
+   parties for a fee.
+
+2. Grant for Non-Commercial Use.
+   Subject to these terms, the copyright holder grants You a worldwide,
+   royalty-free, non-exclusive licence to use, reproduce, modify, and
+   distribute the Software and derivative works of it, solely for
+   Non-Commercial Use.
+
+3. Conditions.
+   (a) You must retain this licence, the copyright notice, and this
+       permission notice in all copies or substantial portions of the
+       Software.
+   (b) If You distribute the Software or a derivative work, You must keep it
+       under this same licence and clearly state any changes You made.
+   (c) You must not remove or obscure authorship or licence information.
+
+4. Commercial Use.
+   Commercial Use is NOT granted by this licence. To use the Software
+   commercially, obtain a separate commercial licence from the copyright
+   holder (contact via the project's GitHub repository).
+
+5. Trademarks.
+   This licence does not grant permission to use the names, logos, or
+   trademarks of the copyright holder, except as required to describe the
+   origin of the Software.
+
+6. No Warranty.
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT.
+
+7. Limitation of Liability.
+   IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR
+   OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+   ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+   OTHER DEALINGS IN THE SOFTWARE.
+
+8. Termination.
+   Any use outside the scope of this licence (in particular, Commercial Use
+   without a separate licence) automatically terminates the rights granted
+   here. Rights may be reinstated by the copyright holder in writing.
