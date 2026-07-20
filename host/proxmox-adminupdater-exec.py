@@ -290,8 +290,9 @@ def do_job(cfg, job):
     # 1b) retention on preupd_ (fresh one protected by keep>=1 / age 0)
     res["pruned"] = prune_snapshots(ctid, prefix, job.get("keep", 0), job.get("max_age_days", 0))
 
-    # 2) detect the guest OS ONCE
+    # 2) detect the guest OS ONCE (also surfaced to the panel via the report)
     distro = detect_distro(ctid)
+    res["distro"] = distro
 
     # 3) run each action in order under that one snapshot
     overall = "ok"

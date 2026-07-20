@@ -209,8 +209,16 @@ QUEUE_KEY = "_queue"       # one-shot ad-hoc jobs (snapshot/purge/update now)
 
 
 def set_inventory(data):
+    # Backstop: never let an empty/failed scan clobber good inventory. A scan
+    # that timed out (pvesm/pct) can come back with zero guests; if we already
+    # hold real data, keep it — otherwise propose_schedule would see 0 fresh
+    # guests and a fallback window, and could plan into a real backup slot.
+    data = dict(data or {})
+    if not data.get("guests"):
+        if get_inventory().get("guests"):
+            return {"ok": False, "kept": True}
     state = core.load_state()
-    state[INVENTORY_KEY] = dict(data or {})
+    state[INVENTORY_KEY] = data
     core.save_state(state)
     return {"ok": True}
 
@@ -534,7 +542,9 @@ def guest_view():
         fresh = guest_backup_fresh(vmid, inv, fresh_h, now)
         g = guest_settings(cfg, vmid)
         blocked = bool(g["enabled"] and sett.get("require_backup", True) and not fresh)
+        distro = (st.get("last") or {}).get("distro")
         out.append({"vmid": int(vmid), "name": meta["name"], "status": meta["status"],
+                    "os": distro.capitalize() if distro and distro != "unknown" else None,
                     "config": g,
                     "report": st.get("last"), "report_snap": st.get("last_snap"),
                     "running": running,

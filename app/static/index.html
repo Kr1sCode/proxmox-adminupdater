@@ -4,66 +4,189 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>adminupdater</title>
 <style>
-  :root{color-scheme:light;--bg:#f8fafc;--fg:#1e293b;--bd:#e2e8f0;--muted:#64748b;--card:#ffffff;--head:#ffffff;--accent:#3b82f6;--chip-bg:#1e293b;--chip-fg:#ffffff}
-  html[data-theme="dark"]{color-scheme:dark;--bg:#0f172a;--fg:#e2e8f0;--bd:#334155;--muted:#94a3b8;--card:#1e293b;--head:#0f172a;--chip-bg:#f1f5f9;--chip-fg:#0f172a}
+  :root{
+    --bg:#0a0f1a;--surface:#0f1826;--surface-2:#14203450;--raise:#16233a;
+    --border:#233350;--border-soft:#1b2740;
+    --ink:#e9eff8;--ink-dim:#9fb1cb;--ink-mute:#64758f;
+    --accent:#46a6e6;--accent-dim:#2b6fa3;
+    --good:#34d399;--good-bg:#0f3d31;--warn:#f5b301;--warn-bg:#3d3108;--crit:#f2706f;--crit-bg:#3d1414;
+    --mono:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --r:12px;--r-sm:8px;color-scheme:dark;
+  }
+  html[data-theme="light"]{
+    --bg:#e8edf4;--surface:#ffffff;--surface-2:#f2f6fb;--raise:#ffffff;
+    --border:#d2dced;--border-soft:#e3eaf3;
+    --ink:#11213b;--ink-dim:#46587a;--ink-mute:#7889a3;
+    --accent:#1f79cb;--accent-dim:#4a94d6;
+    --good:#0e9d6b;--good-bg:#dff5ec;--warn:#b8760a;--warn-bg:#fbf0d6;--crit:#d1403f;--crit-bg:#fbe3e3;color-scheme:light;
+  }
   *{box-sizing:border-box}
   html,body{height:100%;margin:0}
-  body{font:15px/1.5 system-ui,sans-serif;display:flex;flex-direction:column;overflow:hidden;background:var(--bg);color:var(--fg)}
-  header{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;padding:.9rem 1.2rem;border-bottom:1px solid var(--bd)}
-  h1{font-size:1.2rem;margin:0} .sp{flex:1}
-  button{padding:.45rem .9rem;border:1px solid var(--bd);border-radius:8px;background:transparent;color:inherit;cursor:pointer;font:inherit}
-  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
-  button.icon{padding:.4rem .65rem;background:var(--chip-bg);color:var(--chip-fg);border:1px solid var(--chip-bg);font-weight:700}
-  button.icon:hover{opacity:.85}
-  nav{display:flex;gap:.3rem;padding:.5rem 1.2rem 0}
-  nav button{border-bottom:2px solid transparent;border-radius:8px 8px 0 0}
-  nav button.active{border-bottom-color:var(--accent);font-weight:600}
-  main{flex:1;min-height:0;padding:1rem 1.2rem;overflow:hidden;display:flex}
-  .pane{flex:1;min-height:0;display:none;flex-direction:column}
-  .pane.active{display:flex}
-  .scroll{flex:1;min-height:0;overflow-y:auto;border:1px solid var(--bd);border-radius:10px}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.55;
+       -webkit-font-smoothing:antialiased;display:flex;flex-direction:column;overflow:hidden}
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .muted{color:var(--ink-mute)}
+  h1,h2,h3{margin:0;font-weight:650}
+
+  /* command bar */
+  .cmd{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 22px;border-bottom:1px solid var(--border-soft)}
+  .brand{display:flex;align-items:baseline;gap:10px}
+  .brand .logo{font-size:18px;font-weight:700}
+  .brand .node{font-family:var(--mono);font-size:12px;color:var(--ink-dim);padding:3px 8px;border:1px solid var(--border);border-radius:99px}
+  .sp{flex:1}
+  button{font:inherit}
+  .btn{font-size:13px;color:var(--ink);background:var(--surface);border:1px solid var(--border);
+       border-radius:var(--r-sm);padding:7px 12px;cursor:pointer;display:inline-flex;gap:7px;align-items:center}
+  .btn:hover{border-color:var(--accent)}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#04121f;font-weight:650}
+  .btn.ghost{background:transparent}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .chipbtn{font-family:var(--mono);font-size:12px;background:var(--surface-2);border:1px solid var(--border);color:var(--ink-dim);border-radius:var(--r-sm);padding:6px 9px;cursor:pointer}
+  .chipbtn:hover{border-color:var(--accent)}
+  .pausetag{font-family:var(--mono);font-size:11px;color:var(--warn);background:var(--warn-bg);padding:3px 8px;border-radius:99px}
+
+  nav{display:flex;gap:4px;padding:8px 22px 0}
+  nav button{background:transparent;border:0;border-bottom:2px solid transparent;color:var(--ink-dim);
+             padding:6px 10px;cursor:pointer;font-size:13px}
+  nav button.active{border-bottom-color:var(--accent);color:var(--ink);font-weight:600}
+
+  main{flex:1;min-height:0;overflow-y:auto;padding:6px 0 40px}
+  .wrap{max-width:1200px;margin:0 auto;padding:12px 22px}
+  .pane{display:none}.pane.active{display:block}
+
+  /* host strip */
+  .host{display:flex;align-items:center;gap:13px;flex-wrap:wrap;margin:12px 0 18px;padding:13px 16px;border-radius:var(--r);
+        border:1px solid var(--border);background:var(--surface);cursor:pointer}
+  .host.pending{background:linear-gradient(90deg,var(--warn-bg),transparent 60%),var(--surface)}
+  .host.reboot{background:linear-gradient(90deg,var(--crit-bg),transparent 60%),var(--surface)}
+  .host.clean{background:linear-gradient(90deg,var(--good-bg),transparent 60%),var(--surface)}
+  .host .dot{width:9px;height:9px;border-radius:99px;flex:none}
+  .host.pending .dot{background:var(--warn);box-shadow:0 0 0 4px var(--warn-bg)}
+  .host.reboot .dot{background:var(--crit);box-shadow:0 0 0 4px var(--crit-bg)}
+  .host.clean .dot{background:var(--good);box-shadow:0 0 0 4px var(--good-bg)}
+  .host.unknown .dot{background:var(--ink-mute)}
+  .host b{font-weight:650}
+  .host .meta{font-family:var(--mono);font-size:12px;color:var(--ink-dim)}
+  .host .push{margin-left:auto;display:flex;gap:12px;align-items:center}
+
+  /* KPI tiles */
+  .kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin:6px 0 20px}
+  .tile{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--r);padding:14px 15px;
+        display:flex;flex-direction:column;gap:6px;min-height:96px;position:relative;overflow:hidden}
+  .tile .k{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mute)}
+  .tile .v{font-family:var(--mono);font-size:30px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}
+  .tile .s{font-size:12px;color:var(--ink-dim)}
+  .tile .rail{position:absolute;left:0;top:0;bottom:0;width:3px}
+  .rail.good{background:var(--good)}.rail.warn{background:var(--warn)}.rail.crit{background:var(--crit)}.rail.acc{background:var(--accent)}
+  .v.good{color:var(--good)}.v.warn{color:var(--warn)}.v.crit{color:var(--crit)}
+  .cover{height:6px;border-radius:99px;background:var(--surface-2);overflow:hidden;margin-top:2px}
+  .cover>i{display:block;height:100%;background:var(--good);border-radius:99px}
+
+  /* section header */
+  .sec{display:flex;align-items:center;gap:10px;margin:22px 0 12px}
+  .sec h2{font-size:15px}
+  .sec .hint{font-size:12px;color:var(--ink-mute)}
+
+  /* schedule ribbon */
+  .ribbon{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--r);padding:16px 18px 12px}
+  .track{position:relative;height:46px;border-radius:var(--r-sm);background:var(--surface-2);overflow:hidden;border:1px solid var(--border-soft)}
+  .blk{position:absolute;top:6px;bottom:6px;border-radius:6px;display:flex;align-items:center;justify-content:center;
+       font-family:var(--mono);font-size:11px;color:#04121f;font-weight:650;overflow:hidden;white-space:nowrap;padding:0 8px;min-width:3px}
+  .blk.backup{background:repeating-linear-gradient(45deg,var(--crit),var(--crit) 6px,#c85a59 6px,#c85a59 12px);color:#fff}
+  .blk.hostu{background:var(--warn)}
+  .blk.guest{background:var(--accent)}
+  .ticks{display:flex;justify-content:space-between;margin-top:7px;font-family:var(--mono);font-size:10px;color:var(--ink-mute)}
+  .rlegend{display:flex;gap:16px;flex-wrap:wrap;margin-top:11px;font-size:12px;color:var(--ink-dim)}
+  .rlegend span{display:inline-flex;gap:7px;align-items:center}
+  .sw{width:11px;height:11px;border-radius:3px;display:inline-block}
+  .sw.backup{background:var(--crit)}.sw.hostu{background:var(--warn)}.sw.guest{background:var(--accent)}
+
+  /* guest table */
+  .panel{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--r);overflow:hidden}
+  .toolbar{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
   table{width:100%;border-collapse:collapse}
-  thead th{position:sticky;top:0;background:var(--head);z-index:1}
-  th,td{text-align:left;padding:.5rem .7rem;border-bottom:1px solid var(--bd);vertical-align:middle}
-  th{font-size:.78rem;text-transform:uppercase;letter-spacing:.03em;color:var(--muted)}
-  .tag{font-size:.75rem;padding:.1rem .5rem;border-radius:99px;border:1px solid var(--bd)}
-  .ok{color:#22c55e}.bad{color:#ef4444}.muted{color:var(--muted)}
-  .spin{display:inline-block;width:13px;height:13px;border:2px solid var(--bd);border-top-color:var(--accent);border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px}
+  thead th{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-mute);
+           text-align:left;padding:11px 14px;border-bottom:1px solid var(--border)}
+  td{padding:11px 14px;border-bottom:1px solid var(--border-soft);vertical-align:middle}
+  tbody tr:last-child td{border-bottom:0}
+  tbody tr:hover td{background:var(--surface-2)}
+  tr.rowwarn td{background:linear-gradient(90deg,var(--warn-bg),transparent 40%)}
+  .gname{display:flex;align-items:baseline;gap:9px}
+  .gname .nm{font-weight:600}
+  .gname .id{font-family:var(--mono);font-size:11px;color:var(--ink-mute)}
+  .os{font-family:var(--mono);font-size:11px;color:var(--ink-dim)}
+  .chip{font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:99px;border:1px solid var(--border);
+        display:inline-flex;gap:6px;align-items:center;white-space:nowrap}
+  .chip.good{color:var(--good);border-color:transparent;background:var(--good-bg)}
+  .chip.warn{color:var(--warn);border-color:transparent;background:var(--warn-bg)}
+  .chip.crit{color:var(--crit);border-color:transparent;background:var(--crit-bg)}
+  .chip.idle{color:var(--ink-dim)}
+  .snaps{font-family:var(--mono);font-size:12px;color:var(--ink-dim)}
+  .spin{width:13px;height:13px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;
+        display:inline-block;animation:sp .8s linear infinite;vertical-align:-2px}
   @keyframes sp{to{transform:rotate(360deg)}}
-  tr.running{background:color-mix(in srgb,var(--accent) 8%,transparent)}
-  #hostbar{padding:.55rem 1.2rem;font-weight:800;font-size:.95rem;border-bottom:1px solid var(--bd);letter-spacing:.01em}
-  #hostbar.pending{background:#f59e0b;color:#111827}
-  #hostbar.clean{background:#16a34a;color:#fff}
-  #hostbar.reboot{background:#dc2626;color:#fff}
-  #hostbar.unknown{background:var(--card);color:var(--muted);font-weight:600}
-  pre#logbox{margin:0;padding:.8rem 1rem;font:12.5px/1.5 ui-monospace,monospace;white-space:pre-wrap;word-break:break-word}
-  dialog{border:1px solid var(--bd);border-radius:12px;padding:1.2rem;max-width:460px;width:92%;max-height:88vh;overflow-y:auto;color:var(--fg);background:var(--card)}
-  dialog hr{border:0;border-top:1px solid var(--bd);margin:1rem 0}
-  dialog label{display:block;margin:.6rem 0 .2rem;font-weight:600;font-size:.88rem}
-  dialog .row{display:flex;gap:.5rem;align-items:center}
-  dialog .grid2{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
-  input[type=text],input[type=number],select{padding:.4rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;font:inherit;width:100%}
-  .pause{color:#f59e0b}
-  .bar{display:flex;gap:.5rem;align-items:center;padding:0 0 .6rem}
+  @media (prefers-reduced-motion:reduce){.spin{animation:none}}
+  .run{color:var(--accent)}
+  .qtag{font-family:var(--mono);font-size:10.5px;padding:2px 7px;border-radius:99px;background:var(--warn-bg);color:var(--warn);font-weight:650}
   td.acts{white-space:nowrap;text-align:right}
-  td.acts button{padding:.3rem .45rem;margin-left:.25rem;line-height:1}
-  .qtag{font-size:.72rem;padding:.05rem .4rem;border-radius:99px;background:#f59e0b;color:#111827;font-weight:700}
-  #mPreview table{font-size:.85rem}
-  #mPreview .zone{font-size:.8rem;color:var(--muted)}
+  td.acts button{background:transparent;border:1px solid var(--border);color:var(--ink-dim);border-radius:6px;
+                 padding:4px 7px;margin-left:5px;cursor:pointer;line-height:1;font-size:12px}
+  td.acts button:hover{border-color:var(--accent);color:var(--ink)}
+
+  pre#logbox{margin:0;padding:14px 16px;font-family:var(--mono);font-size:12.5px;line-height:1.5;white-space:pre-wrap;word-break:break-word;color:var(--ink-dim)}
+  .logbar{display:flex;gap:10px;align-items:center;margin-bottom:10px;font-size:13px}
+
+  /* dialogs */
+  dialog{border:1px solid var(--border);border-radius:16px;background:var(--surface);color:var(--ink);
+         max-width:720px;width:94vw;padding:0;box-shadow:0 30px 80px #0009}
+  dialog::backdrop{background:#050a12cc;backdrop-filter:blur(3px)}
+  .dlg-head{padding:18px 24px 14px;border-bottom:1px solid var(--border-soft)}
+  .dlg-head h3{font-size:18px}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-mute)}
+  .dlg-body{padding:16px 24px 4px;max-height:66vh;overflow:auto}
+  .dlg-foot{display:flex;gap:10px;justify-content:space-between;padding:16px 24px 20px;border-top:1px solid var(--border-soft);flex-wrap:wrap}
+  dialog label{display:block;margin:.6rem 0 .2rem;font-weight:600;font-size:.86rem}
+  dialog label.thin{font-weight:400}
+  dialog .row{display:flex;gap:.5rem;align-items:center}
+  dialog .grid2{display:grid;grid-template-columns:1fr 1fr;gap:.55rem}
+  dialog hr{border:0;border-top:1px solid var(--border-soft);margin:1rem 0}
+  input[type=text],input[type=number],select{padding:.45rem;border:1px solid var(--border);border-radius:6px;
+        background:var(--surface-2);color:inherit;font:inherit;width:100%}
+  input[type=checkbox]{accent-color:var(--accent)}
+
+  /* wizard */
+  .steps{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap}
+  .step{font-family:var(--mono);font-size:11px;padding:5px 10px;border-radius:99px;border:1px solid var(--border);color:var(--ink-mute)}
+  .step.on{background:var(--accent);border-color:var(--accent);color:#04121f;font-weight:650}
+  .step.done{border-color:var(--good);color:var(--good)}
+  .scan{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:6px 0 14px}
+  .scancard{border:1px solid var(--border-soft);border-radius:var(--r-sm);padding:12px 14px;background:var(--surface-2)}
+  .scancard .n{font-family:var(--mono);font-size:24px;font-weight:600}
+  .scancard .l{font-size:12px;color:var(--ink-dim)}
+  .prop{border:1px solid var(--border-soft);border-radius:var(--r-sm);padding:12px 14px;margin-bottom:9px;background:var(--surface-2)}
+  .prop .row{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+  .toggle{font-family:var(--mono);font-size:11px;color:var(--good);background:var(--good-bg);padding:3px 9px;border-radius:99px}
+  .note{font-size:12px;color:var(--ink-mute);margin-top:4px}
+  .covlist{max-height:34vh;overflow:auto;border:1px solid var(--border-soft);border-radius:var(--r-sm)}
+  .covlist div.r{display:flex;justify-content:space-between;padding:8px 12px;border-bottom:1px solid var(--border-soft);font-size:13px}
+  .covlist div.r:last-child{border-bottom:0}
+
+  .foot{margin:26px 0 0;padding-top:14px;border-top:1px solid var(--border-soft);font-size:12px;color:var(--ink-mute)}
+  @media(max-width:900px){.kpis{grid-template-columns:repeat(2,1fr)}.scan{grid-template-columns:1fr 1fr}.host .push{margin-left:0}}
 </style>
 </head>
 <body>
-<header>
-  <h1>◆ adminupdater</h1>
-  <span id="pausetag"></span>
+<div class="cmd">
+  <div class="brand"><span class="logo">🛡️ adminupdater</span><span class="node mono" id="nodeName"></span></div>
+  <span id="pausewrap"></span>
   <span class="sp"></span>
-  <button class="icon" id="langBtn" title="Language">🌐 EN</button>
-  <button class="icon" id="themeBtn" title="Theme">🌙</button>
-  <button id="pauseBtn"></button>
-  <button id="logout" data-i18n="logout">Log out</button>
-</header>
-
-<div id="hostbar" style="display:none"></div>
+  <button class="btn ghost" id="openWiz">✦ <span data-i18n="wizard">Wizard</span></button>
+  <button class="chipbtn" id="langBtn">EN&nbsp;/&nbsp;PL</button>
+  <button class="chipbtn" id="themeBtn">◐ <span data-i18n="themeWord">Theme</span></button>
+  <button class="btn ghost" id="pauseBtn"></button>
+  <button class="btn ghost" id="logout" data-i18n="logout">Log out</button>
+</div>
 
 <nav>
   <button class="tab active" data-tab="guests" data-i18n="containers">Containers</button>
@@ -71,155 +194,200 @@
 </nav>
 
 <main>
+<div class="wrap">
   <section class="pane active" id="pane-guests">
-    <div class="bar">
-      <button class="primary" id="proposeBtn" data-i18n="proposeBtn">📅 Plan schedule</button>
-      <span class="sp"></span>
-      <button id="bulkSnap" data-i18n="bulkSnap">📷 Snapshot all</button>
-      <button id="bulkUpd" data-i18n="bulkUpd">🔄 Update all</button>
-      <button id="bulkPurge" data-i18n="bulkPurge">🗑 Purge all</button>
+    <div class="host unknown" id="hostbar" style="display:none">
+      <span class="dot"></span><b data-i18n="pveHost">PVE host</b>
+      <span class="meta" id="hostMeta"></span>
+      <span id="hostChip"></span>
+      <span class="push"><span class="meta" id="hostPush"></span><button class="btn ghost" data-i18n="change">Change</button></span>
     </div>
-    <div class="scroll">
+
+    <div class="kpis" id="kpis"></div>
+
+    <div class="sec"><h2 data-i18n="ribbonTitle">Service window</h2><span class="hint" id="ribbonHint"></span></div>
+    <div class="ribbon">
+      <div class="track" id="track"></div>
+      <div class="ticks" id="ticks"></div>
+      <div class="rlegend">
+        <span><i class="sw backup"></i> <span data-i18n="legBackup">Backup (never schedule here)</span></span>
+        <span><i class="sw hostu"></i> <span data-i18n="legHost">Host update</span></span>
+        <span><i class="sw guest"></i> <span data-i18n="legGuest">LXC updates (spread out)</span></span>
+      </div>
+    </div>
+
+    <div class="sec"><h2 data-i18n="machinesTitle">LXC machines</h2><span class="sp"></span><span class="hint" data-i18n="rowHint">click = details / policy</span></div>
+    <div class="toolbar">
+      <button class="btn primary" id="proposeBtn" data-i18n="proposeBtn">📅 Plan schedule</button>
+      <span class="sp"></span>
+      <button class="btn ghost" id="bulkSnap" data-i18n="bulkSnap">📷 Snapshot all</button>
+      <button class="btn ghost" id="bulkUpd" data-i18n="bulkUpd">🔄 Update all</button>
+      <button class="btn ghost" id="bulkPurge" data-i18n="bulkPurge">🗑 Purge all</button>
+    </div>
+    <div class="panel">
       <table>
         <thead><tr>
-          <th data-i18n="thCT">CT</th><th data-i18n="thName">Name</th><th data-i18n="thStatus">Status</th>
-          <th data-i18n="thSchedule">Schedule</th><th data-i18n="thScope">Scope</th>
-          <th data-i18n="thRetention">Retention</th><th data-i18n="thLast">Last</th><th></th>
+          <th data-i18n="thName">Machine</th><th data-i18n="thSystem">System</th><th data-i18n="thBackup">Backup</th>
+          <th data-i18n="thSnaps">Snapshots</th><th data-i18n="thSchedule">Schedule</th>
+          <th data-i18n="thScope">Scope + health</th><th data-i18n="thLast">Last</th><th></th>
         </tr></thead>
         <tbody id="rows"></tbody>
       </table>
     </div>
+
+    <div class="foot" data-i18n="footNote">State colours (green/amber/red) carry meaning; azure accent is navigation only. Notifications: aggregate HTML report after each window + a separate alert only on rollback.</div>
   </section>
 
   <section class="pane" id="pane-log">
-    <div class="bar">
-      <button id="logRefresh" data-i18n="refresh">Refresh</button>
+    <div class="logbar">
+      <button class="btn ghost" id="logRefresh" data-i18n="refresh">Refresh</button>
       <label class="row" style="gap:.35rem;font-size:.85rem"><input type="checkbox" id="logAuto" checked> <span data-i18n="autoLbl">auto (5&nbsp;s)</span></label>
-      <span class="sp"></span>
-      <span class="muted" id="logMeta"></span>
+      <span class="sp"></span><span class="muted" id="logMeta"></span>
     </div>
-    <div class="scroll"><pre id="logbox">…</pre></div>
+    <div class="panel"><pre id="logbox">…</pre></div>
   </section>
+</div>
 </main>
 
+<!-- edit guest -->
 <dialog id="dlg">
-  <h3 style="margin:.2rem 0 0" id="dTitle"></h3>
-  <div class="row" style="margin-top:.6rem"><input type="checkbox" id="dEnabled"><label style="margin:0" data-i18n="enabled">Enabled</label></div>
-  <label data-i18n="schedMode">Schedule mode</label>
-  <select id="dMode"><option value="calendar" data-i18n="calendar">Calendar (days/time)</option><option value="interval" data-i18n="interval">Interval</option></select>
-  <div id="calBox">
+  <div class="dlg-head"><h3 id="dTitle"></h3></div>
+  <div class="dlg-body">
+    <div class="row" style="margin-top:.2rem"><input type="checkbox" id="dEnabled"><label style="margin:0" data-i18n="enabled">Enabled</label></div>
+    <label data-i18n="schedMode">Schedule mode</label>
+    <select id="dMode"><option value="calendar" data-i18n="calendar">Calendar (days/time)</option><option value="interval" data-i18n="interval">Interval</option></select>
+    <div id="calBox"><div class="grid2">
+      <div><label class="thin" data-i18n="timeLbl">Time (HH:MM)</label><input type="text" id="dTime" value="03:30"></div>
+      <div><label class="thin" data-i18n="daysLbl">Days (0=Mon…6=Sun, empty=daily)</label><input type="text" id="dDays" value="6"></div>
+    </div></div>
+    <div id="intBox" style="display:none"><label data-i18n="everyMinLbl">Every N minutes</label><input type="number" id="dInterval" value="10080"></div>
+    <div class="row" style="margin-top:.7rem"><input type="checkbox" id="dSec"><label style="margin:0" data-i18n="secPatch">OS security patches</label></div>
+    <label data-i18n="appRecipe">App update recipe (name without .sh; empty = none)</label><input type="text" id="dApp">
+    <div class="row" style="margin-top:.7rem"><input type="checkbox" id="dSnap"><label style="margin:0" data-i18n="snapBefore">Snapshot before update</label></div>
+    <label style="margin-top:.7rem"><span data-i18n="retentionTitle">Snapshot retention</span> <span class="muted">(preupd_*)</span></label>
     <div class="grid2">
-      <div><label data-i18n="timeLbl">Time (HH:MM)</label><input type="text" id="dTime" value="03:30"></div>
-      <div><label data-i18n="daysLbl">Days (0=Mon…6=Sun, empty=daily)</label><input type="text" id="dDays" value="6"></div>
+      <div><label class="thin" data-i18n="keepLbl">Keep newest (0 = unlimited)</label><input type="number" id="dKeep" min="0" value="3"></div>
+      <div><label class="thin" data-i18n="ageLbl">Delete older than (days, 0 = off)</label><input type="number" id="dAge" min="0" value="0"></div>
     </div>
-  </div>
-  <div id="intBox" style="display:none"><label data-i18n="everyMinLbl">Every N minutes</label><input type="number" id="dInterval" value="10080"></div>
-
-  <div class="row" style="margin-top:.7rem"><input type="checkbox" id="dSec"><label style="margin:0" data-i18n="secPatch">OS security patches</label></div>
-  <label data-i18n="appRecipe">App update recipe (name without .sh; empty = none)</label><input type="text" id="dApp">
-  <div class="row" style="margin-top:.7rem"><input type="checkbox" id="dSnap"><label style="margin:0" data-i18n="snapBefore">Snapshot before update</label></div>
-
-  <label style="margin-top:.7rem"><span data-i18n="retentionTitle">Snapshot retention</span> <span class="muted">(preupd_*)</span></label>
-  <div class="grid2">
-    <div><label style="font-weight:400" data-i18n="keepLbl">Keep newest (0 = unlimited)</label><input type="number" id="dKeep" min="0" value="3"></div>
-    <div><label style="font-weight:400" data-i18n="ageLbl">Delete older than (days, 0 = off)</label><input type="number" id="dAge" min="0" value="0"></div>
-  </div>
-
-  <label style="margin-top:.7rem"><span data-i18n="healthTitle">Health-check after update</span> <span class="muted" data-i18n="healthHint">(failure → rollback)</span></label>
-  <div class="grid2">
-    <select id="dHcType"><option value="none" data-i18n="hcNone">— none —</option><option value="systemd">systemd is-active</option><option value="http">HTTP curl -f</option></select>
-    <input type="text" id="dHcArg" data-i18n-ph="hcArgPh" placeholder="nginx  |  http://127.0.0.1/health">
-  </div>
-
-  <hr>
-  <div class="row"><input type="checkbox" id="sEnabled"><label style="margin:0">📷 <span data-i18n="snapSched">Snapshot schedule</span> <span class="muted" data-i18n="snapHint">(independent of updates, auto_ prefix)</span></label></div>
-  <div id="snapBox">
-    <label data-i18n="mode">Mode</label>
-    <select id="sMode"><option value="calendar" data-i18n="calendarShort">Calendar</option><option value="interval" data-i18n="interval">Interval</option></select>
-    <div id="sCal" class="grid2">
-      <div><label style="font-weight:400" data-i18n="timeLbl">Time (HH:MM)</label><input type="text" id="sTime" value="02:00"></div>
-      <div><label style="font-weight:400" data-i18n="daysShort">Days (empty=daily)</label><input type="text" id="sDays"></div>
-    </div>
-    <div id="sInt" style="display:none"><label style="font-weight:400" data-i18n="everyMinLbl">Every N minutes</label><input type="number" id="sInterval" value="1440"></div>
+    <label style="margin-top:.7rem"><span data-i18n="healthTitle">Health-check after update</span> <span class="muted" data-i18n="healthHint">(failure → rollback)</span></label>
     <div class="grid2">
-      <div><label style="font-weight:400" data-i18n="prefix">Prefix</label><input type="text" id="sPrefix" value="auto"></div>
-      <div><label style="font-weight:400" data-i18n="keepShort">Keep newest</label><input type="number" id="sKeep" min="0" value="3"></div>
+      <select id="dHcType"><option value="none" data-i18n="hcNone">— none —</option><option value="systemd">systemd is-active</option><option value="http">HTTP curl -f</option></select>
+      <input type="text" id="dHcArg" data-i18n-ph="hcArgPh" placeholder="nginx | http://127.0.0.1/health">
     </div>
-    <div class="grid2">
-      <div><label style="font-weight:400" data-i18n="ageShort">Delete older than (days)</label><input type="number" id="sAge" min="0" value="0"></div>
-      <div class="row" style="align-items:center;margin-top:1.6rem"><input type="checkbox" id="sDry"><label style="margin:0" data-i18n="dryrun">Dry-run</label></div>
+    <hr>
+    <div class="row"><input type="checkbox" id="sEnabled"><label style="margin:0">📷 <span data-i18n="snapSched">Snapshot schedule</span> <span class="muted" data-i18n="snapHint">(independent of updates, auto_ prefix)</span></label></div>
+    <div id="snapBox">
+      <label data-i18n="mode">Mode</label>
+      <select id="sMode"><option value="calendar" data-i18n="calendarShort">Calendar</option><option value="interval" data-i18n="interval">Interval</option></select>
+      <div id="sCal" class="grid2">
+        <div><label class="thin" data-i18n="timeLbl">Time (HH:MM)</label><input type="text" id="sTime" value="02:00"></div>
+        <div><label class="thin" data-i18n="daysShort">Days (empty=daily)</label><input type="text" id="sDays"></div>
+      </div>
+      <div id="sInt" style="display:none"><label class="thin" data-i18n="everyMinLbl">Every N minutes</label><input type="number" id="sInterval" value="1440"></div>
+      <div class="grid2">
+        <div><label class="thin" data-i18n="prefix">Prefix</label><input type="text" id="sPrefix" value="auto"></div>
+        <div><label class="thin" data-i18n="keepShort">Keep newest</label><input type="number" id="sKeep" min="0" value="3"></div>
+      </div>
+      <div class="grid2">
+        <div><label class="thin" data-i18n="ageShort">Delete older than (days)</label><input type="number" id="sAge" min="0" value="0"></div>
+        <div class="row" style="align-items:center;margin-top:1.7rem"><input type="checkbox" id="sDry"><label style="margin:0" data-i18n="dryrun">Dry-run</label></div>
+      </div>
     </div>
   </div>
-
-  <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1.2rem">
-    <button onclick="dlg.close()" data-i18n="cancel">Cancel</button><button class="primary" id="dSave" data-i18n="save">Save</button>
-  </div>
+  <div class="dlg-foot"><span></span><div style="display:flex;gap:10px"><button class="btn ghost" onclick="dlg.close()" data-i18n="cancel">Cancel</button><button class="btn primary" id="dSave" data-i18n="save">Save</button></div></div>
 </dialog>
 
+<!-- host update -->
 <dialog id="hdlg">
-  <h3 style="margin:.2rem 0 0" data-i18n="hostTitle">PVE host update</h3>
-  <div class="row" style="margin-top:.6rem"><input type="checkbox" id="hEnabled"><label style="margin:0" data-i18n="hEnabled">Enable scheduled host update</label></div>
-  <label data-i18n="schedMode">Schedule mode</label>
-  <select id="hMode"><option value="calendar" data-i18n="calendar">Calendar (days/time)</option><option value="interval" data-i18n="interval">Interval</option></select>
-  <div id="hCal" class="grid2">
-    <div><label data-i18n="timeLbl">Time (HH:MM)</label><input type="text" id="hTime" value="02:00"></div>
-    <div><label data-i18n="daysLbl">Days (0=Mon…6=Sun, empty=daily)</label><input type="text" id="hDays" value="5"></div>
+  <div class="dlg-head"><h3 data-i18n="hostTitle">PVE host update</h3></div>
+  <div class="dlg-body">
+    <div class="row" style="margin-top:.2rem"><input type="checkbox" id="hEnabled"><label style="margin:0" data-i18n="hEnabled">Enable scheduled host update</label></div>
+    <label data-i18n="schedMode">Schedule mode</label>
+    <select id="hMode"><option value="calendar" data-i18n="calendar">Calendar (days/time)</option><option value="interval" data-i18n="interval">Interval</option></select>
+    <div id="hCal" class="grid2">
+      <div><label class="thin" data-i18n="timeLbl">Time (HH:MM)</label><input type="text" id="hTime" value="02:00"></div>
+      <div><label class="thin" data-i18n="daysLbl">Days (0=Mon…6=Sun, empty=daily)</label><input type="text" id="hDays" value="5"></div>
+    </div>
+    <div id="hInt" style="display:none"><label data-i18n="everyMinLbl">Every N minutes</label><input type="number" id="hInterval" value="10080"></div>
+    <p class="muted" style="font-size:.8rem;margin-top:.6rem" data-i18n="hostNote">The command is defined host-side (host.conf → host_update_cmd) and needs host_update=on there.</p>
   </div>
-  <div id="hInt" style="display:none"><label data-i18n="everyMinLbl">Every N minutes</label><input type="number" id="hInterval" value="10080"></div>
-  <p class="muted" style="font-size:.8rem;margin-top:.6rem" data-i18n="hostNote">The command is defined host-side (host.conf → host_update_cmd) and needs host_update=on there.</p>
-  <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1.2rem">
-    <button onclick="hdlg.close()" data-i18n="cancel">Cancel</button><button class="primary" id="hSave" data-i18n="save">Save</button>
-  </div>
+  <div class="dlg-foot"><span></span><div style="display:flex;gap:10px"><button class="btn ghost" onclick="hdlg.close()" data-i18n="cancel">Cancel</button><button class="btn primary" id="hSave" data-i18n="save">Save</button></div></div>
 </dialog>
 
+<!-- maintenance planner -->
 <dialog id="sdlg">
-  <h3 style="margin:.2rem 0 .3rem" data-i18n="maintTitle">Maintenance window &amp; schedule</h3>
-  <p class="muted" style="font-size:.8rem;margin:0 0 .6rem" data-i18n="maintNote">Places enrolled containers into spaced slots inside the window, skipping every detected backup window and the host-update slot.</p>
-  <div class="grid2">
-    <div><label data-i18n="winStart">Window start (HH:MM)</label><input type="text" id="mStart" value="01:30"></div>
-    <div><label data-i18n="winEnd">Window end (HH:MM)</label><input type="text" id="mEnd" value="05:00"></div>
+  <div class="dlg-head"><h3 data-i18n="maintTitle">Maintenance window &amp; schedule</h3>
+    <p class="muted" style="font-size:.8rem;margin:.5rem 0 0" data-i18n="maintNote">Places enrolled containers into spaced slots inside the window, skipping every detected backup window and the host-update slot.</p></div>
+  <div class="dlg-body">
+    <div class="grid2">
+      <div><label data-i18n="winStart">Window start (HH:MM)</label><input type="text" id="mStart" value="01:30"></div>
+      <div><label data-i18n="winEnd">Window end (HH:MM)</label><input type="text" id="mEnd" value="05:00"></div>
+    </div>
+    <div class="grid2">
+      <div><label data-i18n="maintDay">Day (0=Mon…6=Sun)</label><input type="number" id="mDay" min="0" max="6" value="6"></div>
+      <div><label data-i18n="spacing">Spacing (min)</label><input type="number" id="mSpace" min="1" value="20"></div>
+    </div>
+    <label data-i18n="concurrency">Max concurrent updates</label><input type="number" id="mConc" min="1" value="1">
+    <div style="display:flex;gap:.5rem;margin-top:.9rem;align-items:center">
+      <button class="btn primary" id="mPropose" data-i18n="propose">Propose</button>
+      <span class="sp"></span>
+      <button class="btn ghost" id="mApply" disabled data-i18n="applyPlan">Apply schedule</button>
+    </div>
+    <div id="mPreview" style="margin-top:.8rem"></div>
   </div>
-  <div class="grid2">
-    <div><label data-i18n="maintDay">Day (0=Mon…6=Sun)</label><input type="number" id="mDay" min="0" max="6" value="6"></div>
-    <div><label data-i18n="spacing">Spacing (min)</label><input type="number" id="mSpace" min="1" value="20"></div>
+  <div class="dlg-foot"><span></span><button class="btn ghost" onclick="sdlg.close()" data-i18n="close">Close</button></div>
+</dialog>
+
+<!-- WIZARD -->
+<dialog id="wiz">
+  <div class="dlg-head">
+    <div class="eyebrow" data-i18n="wizEyebrow">Wizard · first run</div>
+    <h3 style="margin-top:6px" data-i18n="wizTitle">Let's schedule safe updates for your fleet</h3>
+    <div class="steps" id="wizSteps"></div>
   </div>
-  <label data-i18n="concurrency">Max concurrent updates</label><input type="number" id="mConc" min="1" value="1">
-  <div style="display:flex;gap:.5rem;margin-top:.9rem">
-    <button class="primary" id="mPropose" data-i18n="propose">Propose</button>
-    <span class="sp"></span>
-    <button id="mApply" disabled data-i18n="applyPlan">Apply schedule</button>
-  </div>
-  <div id="mPreview" style="margin-top:.8rem"></div>
-  <div style="display:flex;justify-content:flex-end;margin-top:1rem">
-    <button onclick="sdlg.close()" data-i18n="cancel">Cancel</button>
+  <div class="dlg-body" id="wizBody"></div>
+  <div class="dlg-foot">
+    <button class="btn ghost" id="wizClose" data-i18n="wizClose">Close (finish later)</button>
+    <div style="display:flex;gap:10px">
+      <button class="btn ghost" id="wizBack" data-i18n="wizBack">Back</button>
+      <button class="btn primary" id="wizNext"></button>
+    </div>
   </div>
 </dialog>
 
 <script>
 const el=id=>document.getElementById(id);
-let SET={};
+let SET={},HU={},DATA={guests:[]};
 
-// ---- i18n ----
+// ---------- i18n ----------
 const I18N={
-  en:{containers:'Containers',log:'Log',logout:'Log out',pause:'⏸ Global pause',resume:'▶ Resume',pauseTag:'PAUSED',
-    thCT:'CT',thName:'Name',thStatus:'Status',thSchedule:'Schedule',thScope:'Scope',thRetention:'Retention',thLast:'Last',
-    edit:'Edit',disabled:'disabled',allDays:'all',daysWord:'days',
+  en:{containers:'Containers',log:'Log',logout:'Log out',pause:'⏸ Pause',resume:'▶ Resume',pauseTag:'PAUSED',
+    wizard:'Wizard',themeWord:'Theme',change:'Change',
+    thName:'Machine',thSystem:'System',thBackup:'Backup',thSnaps:'Snapshots',thSchedule:'Schedule',thScope:'Scope + health',thLast:'Last',
+    edit:'Edit',disabled:'disabled',allDays:'daily',paused:'paused',
     refresh:'Refresh',autoLbl:'auto (5 s)',logMeta:'last 200 lines',empty:'(empty)',
+    ribbonTitle:'Service window',ribbonHint:'— jobs laid out to dodge the nightly backup',
+    legBackup:'Backup (never schedule here)',legHost:'Host update',legGuest:'LXC updates (spread out)',
+    machinesTitle:'LXC machines',rowHint:'click = details / policy',
+    kManaged:'Managed',kManagedS:'of {n} LXC on host',kCurrent:'Up to date',kCurrentS:'after last run',
+    kPending:'Pending',kPendingS:'scheduled soon',kProblems:'Problems',kProblemsS:'rollback / health-check',
+    kCoverage:'Backup coverage',kCoverageS:'{a} / {b} have a fresh copy',kNext:'Next run',kNextS:'{n} machines',kNextNone:'no run',
+    noWindows:'no backup window detected',noBackupPlan:'no backup → skipped',blockedNoBackup:'no backup → not touched',
     enabled:'Enabled',schedMode:'Schedule mode',calendar:'Calendar (days/time)',calendarShort:'Calendar',interval:'Interval',
     timeLbl:'Time (HH:MM)',daysLbl:'Days (0=Mon…6=Sun, empty=daily)',daysShort:'Days (empty=daily)',everyMinLbl:'Every N minutes',
     secPatch:'OS security patches',appRecipe:'App update recipe (name without .sh; empty = none)',
     snapBefore:'Snapshot before update',retentionTitle:'Snapshot retention',
     keepLbl:'Keep newest (0 = unlimited)',ageLbl:'Delete older than (days, 0 = off)',
-    healthTitle:'Health-check after update',healthHint:'(failure → rollback)',hcNone:'— none —',hcArgPh:'nginx  |  http://127.0.0.1/health',
+    healthTitle:'Health-check after update',healthHint:'(failure → rollback)',hcNone:'— none —',hcArgPh:'nginx | http://127.0.0.1/health',
     snapSched:'Snapshot schedule',snapHint:'(independent of updates, auto_ prefix)',
     mode:'Mode',prefix:'Prefix',keepShort:'Keep newest',ageShort:'Delete older than (days)',dryrun:'Dry-run',
-    cancel:'Cancel',save:'Save',
-    pveHost:'PVE host',hUpdates:'updates pending',hUpToDate:'up to date',hReboot:'reboot required after update',hUnknown:'update status unknown (waiting for host)',
-    hostTitle:'PVE host update',hEnabled:'Enable scheduled host update',hLast:'last',
+    cancel:'Cancel',save:'Save',close:'Close',
+    pveHost:'PVE host',hUpdates:'updates pending',hUpToDate:'up to date',hReboot:'reboot required',hUnknown:'status unknown (waiting for host)',
+    hostTitle:'PVE host update',hEnabled:'Enable scheduled host update',hLast:'last',hostUpd:'host update',
     hostNote:'The command is defined host-side (host.conf → host_update_cmd) and needs host_update=on there.',
     proposeBtn:'📅 Plan schedule',bulkSnap:'📷 Snapshot all',bulkUpd:'🔄 Update all',bulkPurge:'🗑 Purge all',
-    snapNow:'Snapshot now',updNow:'Update now',purgeNow:'Purge snapshots',queued:'queued',
-    confirmSnapAll:'Take a snapshot now on every container?',confirmUpdAll:'Run updates now on every container? (containers with nothing to update are skipped)',
+    snapNow:'Snapshot now',updNow:'Update now',purgeNow:'Purge snapshots',queued:'queued',running:'updating…',
+    confirmSnapAll:'Take a snapshot now on every container?',confirmUpdAll:'Run updates now on every container? (nothing-to-do containers are skipped)',
     confirmPurgeAll:'Delete ALL managed snapshots (preupd_/auto_) on every container? Manual snapshots are kept.',
     confirmSnap:'Take a snapshot now on CT',confirmUpd:'Run the update now on CT',
     confirmPurge:'Delete ALL managed snapshots (preupd_/auto_) on CT',keepManual:'? Manual snapshots are kept.',
@@ -228,25 +396,50 @@ const I18N={
     maintTitle:'Maintenance window & schedule',maintNote:'Places enrolled containers into spaced slots inside the window, skipping every detected backup window and the host-update slot.',
     winStart:'Window start (HH:MM)',winEnd:'Window end (HH:MM)',maintDay:'Day (0=Mon…6=Sun)',spacing:'Spacing (min)',concurrency:'Max concurrent updates',
     propose:'Propose',applyPlan:'Apply schedule',planPreview:'Proposed schedule',forbiddenZones:'Blocked windows (backups/host)',
-    unplaceableLbl:'No slot (window too small)',noFresh:'No containers with a fresh backup to schedule.',placedWord:'placed',appliedN:'Schedule applied to'},
-  pl:{containers:'Kontenery',log:'Log',logout:'Wyloguj',pause:'⏸ Pauza globalna',resume:'▶ Wznów',pauseTag:'PAUZA',
-    thCT:'CT',thName:'Nazwa',thStatus:'Status',thSchedule:'Harmonogram',thScope:'Zakres',thRetention:'Retencja',thLast:'Ostatnio',
-    edit:'Edytuj',disabled:'wyłączony',allDays:'wsz.',daysWord:'dni',
+    unplaceableLbl:'No slot (window too small)',noFresh:'No containers with a fresh backup to schedule.',placedWord:'placed',appliedN:'Schedule applied to',
+    footNote:'State colours (green/amber/red) carry meaning; azure accent is navigation only. Notifications: aggregate HTML report after each window + a separate alert only on rollback.',
+    // wizard
+    wizEyebrow:'Wizard · first run',wizTitle:"Let's schedule safe updates for your fleet",wizClose:'Close (finish later)',wizBack:'Back',wizFinish:'Finish',
+    st1:'1 · Scan',st2:'2 · Backup coverage',st3:'3 · Schedule',st4:'4 · Scope + health',st5:'5 · Notifications',
+    wizScanLead:'I scanned host {n}. Here is what I found:',scLxc:'LXC containers',scFresh:'have a fresh backup (< {h} h)',scSnaps:'snapshots total',scNoBk:'with no backup at all — risk',
+    wizWinFound:'Detected backup window {w}',wizAvoiding:'avoiding this window',wizWinNone:'No backup job detected yet — the host learns windows from real backups.',
+    wizNoBkList:'No backup — kept out of auto-update',wizNoBkNote:"I won't auto-update machines without a copy. You can enable them consciously.",
+    next2:'Next: backup coverage →',next3:'Next: schedule →',next4:'Next: scope + health →',next5:'Next: notifications →',
+    wizCovLead:'Backup coverage per container. Machines without a fresh copy are excluded from automatic updates (foolproof).',
+    fresh:'fresh',stale:'stale',none:'none',
+    wizSchedLead:'I place updates into your maintenance window and skip every backup window. Adjust and press Propose.',
+    wizScopeLead:'Default policy applied to enrolled containers with a fresh backup:',
+    wizScopeSec:'OS security patches',wizScopeApp:'App recipe (optional, name without .sh)',wizScopeHc:'Health-check',
+    wizNotifLead:'Email reports go through the Proxmox host mail transport (postfix/sendmail) you already configured.',
+    wizNotifNote:'Configure recipient + when in host.conf: notify_email, notify_on = always|errors|never. Nothing to enter here.',
+    wizApplyDone:'Done — schedule + policy applied. Welcome aboard.',wizApplyPlan:'Apply & finish',wizNoPlan:'Propose a schedule first (step 3).',
+    yes:'yes',no:'no'},
+  pl:{containers:'Kontenery',log:'Log',logout:'Wyloguj',pause:'⏸ Pauza',resume:'▶ Wznów',pauseTag:'PAUZA',
+    wizard:'Kreator',themeWord:'Motyw',change:'Zmień',
+    thName:'Maszyna',thSystem:'System',thBackup:'Backup',thSnaps:'Migawki',thSchedule:'Harmonogram',thScope:'Zakres + health',thLast:'Ostatnio',
+    edit:'Edytuj',disabled:'wyłączony',allDays:'codz.',paused:'pauza',
     refresh:'Odśwież',autoLbl:'auto (5 s)',logMeta:'ostatnie 200 linii',empty:'(pusto)',
+    ribbonTitle:'Okno serwisowe',ribbonHint:'— zadania ułożone tak, by omijać nocny backup',
+    legBackup:'Backup (nie planuj tu aktualizacji)',legHost:'Aktualizacja hosta',legGuest:'Aktualizacje LXC (rozłożone)',
+    machinesTitle:'Maszyny LXC',rowHint:'klik = szczegóły / edycja polityki',
+    kManaged:'Zarządzane',kManagedS:'z {n} LXC na hoście',kCurrent:'Aktualne',kCurrentS:'po ostatnim runie',
+    kPending:'Oczekują',kPendingS:'zaplanowane wkrótce',kProblems:'Problemy',kProblemsS:'rollback / health-check',
+    kCoverage:'Pokrycie backupem',kCoverageS:'{a} / {b} ma świeżą kopię',kNext:'Najbliższy run',kNextS:'{n} maszyn',kNextNone:'brak runu',
+    noWindows:'nie wykryto okna backupu',noBackupPlan:'brak backupu → pominięte',blockedNoBackup:'bez backupu → nie ruszam',
     enabled:'Włączony',schedMode:'Tryb harmonogramu',calendar:'Kalendarz (dni/godzina)',calendarShort:'Kalendarz',interval:'Interwał',
     timeLbl:'Godzina (HH:MM)',daysLbl:'Dni (0=Pn…6=Nd, pusto=codz.)',daysShort:'Dni (pusto=codz.)',everyMinLbl:'Co ile minut',
     secPatch:'Patche bezpieczeństwa OS',appRecipe:'Recepta aktualizacji aplikacji (nazwa bez .sh; pusto = brak)',
     snapBefore:'Snapshot przed aktualizacją',retentionTitle:'Retencja migawek',
     keepLbl:'Trzymaj ostatnie (0 = bez limitu)',ageLbl:'Kasuj starsze niż (dni, 0 = off)',
-    healthTitle:'Health-check po aktualizacji',healthHint:'(porażka → rollback)',hcNone:'— brak —',hcArgPh:'nginx  |  http://127.0.0.1/health',
+    healthTitle:'Health-check po aktualizacji',healthHint:'(porażka → rollback)',hcNone:'— brak —',hcArgPh:'nginx | http://127.0.0.1/health',
     snapSched:'Harmonogram migawek',snapHint:'(niezależny od aktualizacji, prefix auto_)',
     mode:'Tryb',prefix:'Prefix',keepShort:'Trzymaj ostatnie',ageShort:'Kasuj starsze niż (dni)',dryrun:'Dry-run',
-    cancel:'Anuluj',save:'Zapisz',
-    pveHost:'Host PVE',hUpdates:'aktualizacji do zainstalowania',hUpToDate:'aktualny',hReboot:'wymagany restart po aktualizacji',hUnknown:'status nieznany (czekam na hosta)',
-    hostTitle:'Aktualizacja hosta PVE',hEnabled:'Włącz zaplanowaną aktualizację hosta',hLast:'ostatnio',
+    cancel:'Anuluj',save:'Zapisz',close:'Zamknij',
+    pveHost:'Host PVE',hUpdates:'aktualizacji do zainstalowania',hUpToDate:'aktualny',hReboot:'wymagany restart',hUnknown:'status nieznany (czekam na hosta)',
+    hostTitle:'Aktualizacja hosta PVE',hEnabled:'Włącz zaplanowaną aktualizację hosta',hLast:'ostatnio',hostUpd:'aktualizacja hosta',
     hostNote:'Komenda jest po stronie hosta (host.conf → host_update_cmd) i wymaga host_update=on.',
     proposeBtn:'📅 Zaplanuj harmonogram',bulkSnap:'📷 Migawka wszystkim',bulkUpd:'🔄 Aktualizuj wszystkie',bulkPurge:'🗑 Usuń migawki wszystkim',
-    snapNow:'Migawka teraz',updNow:'Aktualizuj teraz',purgeNow:'Usuń migawki',queued:'w kolejce',
+    snapNow:'Migawka teraz',updNow:'Aktualizuj teraz',purgeNow:'Usuń migawki',queued:'w kolejce',running:'aktualizuję…',
     confirmSnapAll:'Zrobić migawkę teraz na każdym kontenerze?',confirmUpdAll:'Uruchomić aktualizacje teraz na każdym kontenerze? (kontenery bez nic do zrobienia są pomijane)',
     confirmPurgeAll:'Usunąć WSZYSTKIE zarządzane migawki (preupd_/auto_) na każdym kontenerze? Ręczne pozostają.',
     confirmSnap:'Zrobić migawkę teraz na CT',confirmUpd:'Uruchomić aktualizację teraz na CT',
@@ -256,219 +449,403 @@ const I18N={
     maintTitle:'Okno serwisowe i harmonogram',maintNote:'Rozmieszcza włączone kontenery w odstępach wewnątrz okna, omijając każde wykryte okno backupu i slot aktualizacji hosta.',
     winStart:'Początek okna (HH:MM)',winEnd:'Koniec okna (HH:MM)',maintDay:'Dzień (0=Pn…6=Nd)',spacing:'Odstęp (min)',concurrency:'Maks. równoległych aktualizacji',
     propose:'Zaproponuj',applyPlan:'Zastosuj harmonogram',planPreview:'Proponowany harmonogram',forbiddenZones:'Okna zablokowane (backupy/host)',
-    unplaceableLbl:'Brak miejsca (okno za małe)',noFresh:'Brak kontenerów ze świeżą kopią do zaplanowania.',placedWord:'rozmieszczono',appliedN:'Harmonogram zastosowany do'}
+    unplaceableLbl:'Brak miejsca (okno za małe)',noFresh:'Brak kontenerów ze świeżą kopią do zaplanowania.',placedWord:'rozmieszczono',appliedN:'Harmonogram zastosowany do',
+    footNote:'Kolory stanu (zielony/bursztyn/czerwony) niosą znaczenie; akcent (azur) to tylko nawigacja. Powiadomienia: zbiorczy raport HTML po każdym oknie + osobny alert tylko przy rollbacku.',
+    wizEyebrow:'Kreator · pierwsze uruchomienie',wizTitle:'Ułóżmy bezpieczne aktualizacje Twojej floty',wizClose:'Zamknij (dokończę później)',wizBack:'Wstecz',wizFinish:'Zakończ',
+    st1:'1 · Skan',st2:'2 · Pokrycie backupem',st3:'3 · Harmonogram',st4:'4 · Zakres + health',st5:'5 · Powiadomienia',
+    wizScanLead:'Przeskanowałem hosta {n}. Oto co znalazłem:',scLxc:'kontenerów LXC',scFresh:'ma świeży backup (< {h} h)',scSnaps:'migawek łącznie',scNoBk:'bez żadnej kopii — ryzyko',
+    wizWinFound:'Wykryto okno backupu {w}',wizAvoiding:'omijam to okno',wizWinNone:'Nie wykryto jeszcze zadania backupu — host uczy się okien z realnych kopii.',
+    wizNoBkList:'Brak backupu — pomijam z auto-update',wizNoBkNote:'Nie planuję automatycznych aktualizacji maszyn bez kopii. Możesz włączyć świadomie.',
+    next2:'Dalej: pokrycie backupem →',next3:'Dalej: harmonogram →',next4:'Dalej: zakres + health →',next5:'Dalej: powiadomienia →',
+    wizCovLead:'Pokrycie backupem per kontener. Maszyny bez świeżej kopii są wykluczone z automatycznych aktualizacji (głupoto odporne).',
+    fresh:'świeża',stale:'nieświeża',none:'brak',
+    wizSchedLead:'Układam aktualizacje w Twoim oknie serwisowym i omijam każde okno backupu. Dostrój i naciśnij Zaproponuj.',
+    wizScopeLead:'Domyślna polityka dla włączonych kontenerów ze świeżym backupem:',
+    wizScopeSec:'Patche bezpieczeństwa OS',wizScopeApp:'Recepta aplikacji (opcjonalnie, nazwa bez .sh)',wizScopeHc:'Health-check',
+    wizNotifLead:'Raporty e-mail idą przez pocztę hosta Proxmox (postfix/sendmail), którą już skonfigurowałeś.',
+    wizNotifNote:'Odbiorcę i kiedy ustaw w host.conf: notify_email, notify_on = always|errors|never. Tu nic nie wpisujesz.',
+    wizApplyDone:'Gotowe — harmonogram + polityka zastosowane. Witaj na pokładzie.',wizApplyPlan:'Zastosuj i zakończ',wizNoPlan:'Najpierw zaproponuj harmonogram (krok 3).',
+    yes:'tak',no:'nie'}
 };
 let LANG=localStorage.getItem('au_lang')||'en';
-const t=k=>(I18N[LANG]&&I18N[LANG][k])||(I18N.en[k])||k;
+const t=(k,vars)=>{let s=(I18N[LANG]&&I18N[LANG][k])||I18N.en[k]||k;if(vars)for(const v in vars)s=s.replace('{'+v+'}',vars[v]);return s;};
 function applyLang(l){
-  LANG=l; localStorage.setItem('au_lang',l); document.documentElement.lang=l;
-  el('langBtn').textContent='🌐 '+l.toUpperCase();
+  LANG=l;localStorage.setItem('au_lang',l);document.documentElement.lang=l;
+  el('langBtn').innerHTML=l==='en'?'<b>EN</b>&nbsp;/&nbsp;PL':'EN&nbsp;/&nbsp;<b>PL</b>';
   document.querySelectorAll('[data-i18n]').forEach(n=>n.textContent=t(n.dataset.i18n));
   document.querySelectorAll('[data-i18n-ph]').forEach(n=>n.placeholder=t(n.dataset.i18nPh));
-  load();
+  render();if(el('wiz').open)renderWiz();
 }
 el('langBtn').onclick=()=>applyLang(LANG==='en'?'pl':'en');
 
-// ---- theme ----
-function applyTheme(th){
-  document.documentElement.setAttribute('data-theme',th);
-  localStorage.setItem('au_theme',th);
-  el('themeBtn').textContent=th==='dark'?'☀️':'🌙';
-}
+// ---------- theme ----------
+function applyTheme(th){document.documentElement.setAttribute('data-theme',th);localStorage.setItem('au_theme',th);
+  el('themeBtn').innerHTML=(th==='dark'?'☀️ ':'🌙 ')+`<span>${t('themeWord')}</span>`;}
 el('themeBtn').onclick=()=>applyTheme(document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark');
-applyTheme(localStorage.getItem('au_theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'));
+applyTheme(localStorage.getItem('au_theme')||'dark');
 
-// ---- tabs ----
-let logTimer=null, guestsTimer=null;
-function startGuestsAuto(){stopGuestsAuto();guestsTimer=setInterval(()=>{if(!el('dlg').open)load();},5000);}
+// ---------- tabs ----------
+let logTimer=null,guestsTimer=null;
+function startGuestsAuto(){stopGuestsAuto();guestsTimer=setInterval(()=>{if(!el('dlg').open&&!el('wiz').open)load();},5000);}
 function stopGuestsAuto(){if(guestsTimer){clearInterval(guestsTimer);guestsTimer=null;}}
 document.querySelectorAll('nav .tab').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('nav .tab').forEach(x=>x.classList.toggle('active',x===b));
   document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('active',p.id==='pane-'+b.dataset.tab));
-  if(b.dataset.tab==='log'){stopGuestsAuto();loadLog();startLogAuto();} else {stopLogAuto();load();startGuestsAuto();}
+  if(b.dataset.tab==='log'){stopGuestsAuto();loadLog();startLogAuto();}else{stopLogAuto();load();startGuestsAuto();}
 });
 
-// ---- PVE host update banner ----
-let HU={};
-function renderHostbar(h){
-  const hb=el('hostbar'); hb.style.display='block'; hb.style.cursor='pointer';
-  const pve=h&&h.pve?` — ${h.pve}`:'';
-  const lr=h&&h.last?` · ${t('hLast')}: ${(h.last.ts||'').slice(0,16).replace('T',' ')} ${h.last.status}`:'';
-  const sched=HU.enabled?' ⏱':'';
-  if(h&&h.reboot){hb.className='reboot';hb.textContent=`⚠️ ${t('pveHost')}: ${t('hReboot')}${pve}${lr}${sched}`;}
-  else if(h&&h.pending>0){hb.className='pending';hb.textContent=`⬆️ ${t('pveHost')}: ${h.pending} ${t('hUpdates')}${pve}${lr}${sched}`;}
-  else if(h&&h.pending===0){hb.className='clean';hb.textContent=`✔ ${t('pveHost')}: ${t('hUpToDate')}${pve}${lr}${sched}`;}
-  else {hb.className='unknown';hb.textContent=`${t('pveHost')}: ${t('hUnknown')}${sched}`;}
-}
-function openHost(){
-  el('hEnabled').checked=!!HU.enabled; el('hMode').value=HU.mode||'calendar';
-  el('hTime').value=(HU.times||['02:00'])[0]; el('hDays').value=(HU.weekdays||[]).join(',');
-  el('hInterval').value=HU.interval_minutes||10080;
-  toggleHostMode(); el('hdlg').showModal();
-}
-function toggleHostMode(){const cal=el('hMode').value==='calendar';el('hCal').style.display=cal?'':'none';el('hInt').style.display=cal?'none':''}
-el('hMode').onchange=toggleHostMode;
-el('hSave').onclick=async()=>{
-  const body={enabled:el('hEnabled').checked,mode:el('hMode').value,
-    times:[el('hTime').value.trim()],
-    weekdays:el('hDays').value.split(',').map(x=>x.trim()).filter(x=>x!=='').map(Number),
-    interval_minutes:+el('hInterval').value||10080};
-  await fetch('/api/host-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  el('hdlg').close(); load();
-};
-el('hostbar').onclick=openHost;
+// ---------- helpers ----------
+const pad=n=>String(n).padStart(2,'0');
+const fmtMin=m=>`${pad(Math.floor(((m%1440)+1440)%1440/60))}:${pad(((m%60)+60)%60)}`;
+const hhmmToMin=s=>{const m=/^(\d{1,2}):(\d{2})$/.exec((s||'').trim());return m?(+m[1])*60+(+m[2]):null;};
+const pyWeekday=d=>((d.getDay()+6)%7); // JS Sun=0 -> Py Mon=0..Sun=6
+const osIcon=n=>{n=(n||'').toLowerCase();if(!n)return '·';return n.includes('alpine')?'△':n.includes('arch')?'✦':'▲';};
 
-// ---- guests ----
-async function load(){
-  const [d,q]=await Promise.all([
-    (await fetch('/api/guests')).json(),
-    (await fetch('/api/queue')).json().catch(()=>({queue:[]}))]);
-  SET=d.settings;
-  HU=d.host_update||{};
-  const QMAP={}; for(const j of (q.queue||[])) QMAP[j.ctid]=true;
-  renderHostbar(d.host);
+// nearest upcoming calendar run across enabled guests
+function nextRunInfo(guests){
+  const now=new Date();let best=null,bestGuests=0;
+  for(let d=0;d<8;d++){
+    const day=new Date(now);day.setDate(now.getDate()+d);const wd=pyWeekday(day);
+    let dayMin=null,cnt=0;
+    for(const g of guests){const c=g.config;if(!c.enabled||c.mode!=='calendar')continue;
+      const wds=c.weekdays&&c.weekdays.length?c.weekdays:[0,1,2,3,4,5,6];if(!wds.includes(wd))continue;
+      const m=hhmmToMin((c.times||[])[0]);if(m==null)continue;
+      const cand=new Date(day);cand.setHours(Math.floor(m/60),m%60,0,0);
+      if(cand<=now)continue;cnt++;if(dayMin==null||m<dayMin)dayMin=m;
+    }
+    if(dayMin!=null){best=dayMin;bestGuests=cnt;break;}
+  }
+  return best==null?null:{time:fmtMin(best),count:bestGuests};
+}
+
+// ---------- host strip ----------
+function renderHostbar(h){
+  const hb=el('hostbar');hb.style.display='';
+  const pve=h&&h.pve?h.pve:'';
+  const lr=h&&h.last?` · ${t('hLast')}: ${(h.last.ts||'').slice(0,16).replace('T',' ')} ${h.last.status}`:'';
+  const schedTxt=HU.enabled&&HU.mode==='calendar'
+    ? `${t('hostUpd')}: ${(HU.times||['02:00'])[0]}${(HU.weekdays||[]).length?' ('+(HU.weekdays||[]).map(w=>['Mo','Tu','We','Th','Fr','Sa','Su'][w]).join(',')+')':''}`
+    : (HU.enabled?`${t('hostUpd')}: ⏱`:'');
+  el('hostMeta').textContent=pve;
+  el('hostPush').textContent=schedTxt+lr;
+  const chip=el('hostChip');
+  if(h&&h.reboot){hb.className='host reboot';chip.innerHTML=`<span class="chip crit">⚠ ${t('hReboot')}</span>`;}
+  else if(h&&h.pending>0){hb.className='host pending';chip.innerHTML=`<span class="chip warn">⬆ ${h.pending} ${LANG==='pl'?'akt.':'upd.'}</span>`;}
+  else if(h&&h.pending===0){hb.className='host clean';chip.innerHTML=`<span class="chip good">✔ ${t('hUpToDate')}</span>`;}
+  else{hb.className='host unknown';chip.innerHTML=`<span class="chip idle">${t('hUnknown')}</span>`;}
+}
+
+// ---------- KPI tiles ----------
+function renderKpis(g){
+  const total=g.length,managed=g.filter(x=>x.config.enabled).length;
+  const ok=g.filter(x=>x.report&&x.report.status==='ok').length;
+  const problems=g.filter(x=>x.report&&x.report.status!=='ok').length;
+  const fresh=g.filter(x=>x.backup&&x.backup.fresh).length;
+  const cov=total?Math.round(fresh/total*100):0;
+  const nr=nextRunInfo(g);
+  const tiles=[
+    {rail:'acc',k:t('kManaged'),v:managed,s:t('kManagedS',{n:total})},
+    {rail:'good',k:t('kCurrent'),v:ok,cls:'good',s:t('kCurrentS')},
+    {rail:'warn',k:t('kPending'),v:nr?nr.count:0,cls:'warn',s:t('kPendingS')},
+    {rail:'crit',k:t('kProblems'),v:problems,cls:problems?'crit':'',s:t('kProblemsS')},
+    {rail:'good',k:t('kCoverage'),v:cov+'%',cover:cov,s:t('kCoverageS',{a:fresh,b:total})},
+    {rail:'acc',k:t('kNext'),v:nr?nr.time:'—',small:1,s:nr?t('kNextS',{n:nr.count}):t('kNextNone')},
+  ];
+  el('kpis').innerHTML=tiles.map(x=>`<div class="tile"><span class="rail ${x.rail}"></span>
+    <span class="k">${x.k}</span>
+    <span class="v mono ${x.cls||''}"${x.small?' style="font-size:22px"':''}>${x.v}</span>
+    ${x.cover!=null?`<div class="cover"><i style="width:${x.cover}%"></i></div>`:''}
+    <span class="s">${x.s}</span></div>`).join('');
+}
+
+// ---------- schedule ribbon ----------
+const RIB_START=21*60,RIB_LEN=11*60; // 21:00 → 08:00
+const ribNorm=m=>(((m-RIB_START)%1440)+1440)%1440;
+function ribPct(m){return ribNorm(m)/RIB_LEN*100;}
+function renderRibbon(d){
+  const inv=d.inventory||{},track=el('track');let html='';
+  // backup windows (red hatched)
+  for(const w of (inv.windows||[])){
+    const l=ribPct(w.start_min);let width=(((w.end_min-w.start_min)%1440)+1440)%1440/RIB_LEN*100;
+    if(ribNorm(w.start_min)>RIB_LEN&&ribNorm(w.end_min)>RIB_LEN)continue;
+    width=Math.max(2,Math.min(width,100-l));
+    html+=`<div class="blk backup" style="left:${l}%;width:${width}%" title="backup ${fmtMin(w.start_min)}–${fmtMin(w.end_min)}">⚠ ${fmtMin(w.start_min)}–${fmtMin(w.end_min)}</div>`;
+  }
+  // host update slot (amber)
+  if(HU.enabled&&HU.mode==='calendar'){const hm=hhmmToMin((HU.times||['02:00'])[0]);
+    if(hm!=null&&ribNorm(hm)<=RIB_LEN)html+=`<div class="blk hostu" style="left:${ribPct(hm)}%;width:5%" title="host">host</div>`;}
+  // enabled guests (azure)
+  const gs=d.guests.filter(x=>x.config.enabled&&x.config.mode==='calendar'&&hhmmToMin((x.config.times||[])[0])!=null)
+    .map(x=>({name:x.name,m:hhmmToMin(x.config.times[0])})).filter(x=>ribNorm(x.m)<=RIB_LEN).sort((a,b)=>ribNorm(a.m)-ribNorm(b.m));
+  for(const x of gs)html+=`<div class="blk guest" style="left:${ribPct(x.m)}%;width:6%" title="${x.name} · ${fmtMin(x.m)}">${x.name}</div>`;
+  track.innerHTML=html||`<div style="padding:14px;color:var(--ink-mute);font-size:12px">${t('noWindows')}</div>`;
+  el('ticks').innerHTML=[0,2,4,6,8,10,11].map(h=>`<span>${fmtMin(RIB_START+h*60)}</span>`).join('');
+  el('ribbonHint').textContent=(inv.windows&&inv.windows.length)?t('ribbonHint'):'— '+t('noWindows');
+}
+
+// ---------- guest table ----------
+function backupChip(g){
+  const b=g.backup||{};
+  if(!b.info)return `<span class="chip crit">✗ ${LANG==='pl'?'brak kopii':'no copy'}</span>`;
+  const ts=b.info.ts;let ageTxt='';
+  if(ts){const then=new Date(ts.replace(' ','T')+'Z');const h=Math.max(0,Math.round((Date.now()-then)/3600000));
+    ageTxt=h<48?`${h} h`:`${Math.round(h/24)} d`;}
+  return b.fresh?`<span class="chip good">✓ ${ageTxt}</span>`:`<span class="chip warn">⚠ ${ageTxt}</span>`;
+}
+function render(){
+  if(!DATA.guests)return;
+  const d=DATA;
+  renderHostbar(d.host);renderKpis(d.guests);renderRibbon(d);
   el('pauseBtn').textContent=SET.paused?t('resume'):t('pause');
-  el('pausetag').innerHTML=SET.paused?`<span class="tag pause">${t('pauseTag')}</span>`:'';
-  const rows=el('rows'); rows.innerHTML='';
+  el('pausewrap').innerHTML=SET.paused?`<span class="pausetag">${t('pauseTag')}</span>`:'';
+  const QMAP=DATA._queue||{};
+  const rows=el('rows');rows.innerHTML='';
   for(const g of d.guests){
-    const c=g.config, r=g.report;
-    const sched=c.mode==='calendar'?`${(c.times||[]).join(',')} · ${t('daysWord')} ${(c.weekdays||[]).join(',')||t('allDays')}`:`${c.interval_minutes} min`;
+    const c=g.config,r=g.report;
+    const sched=c.mode==='calendar'
+      ? `${(c.times||[]).join(',')} · ${(c.weekdays||[]).length?(c.weekdays||[]).map(w=>['Mo','Tu','We','Th','Fr','Sa','Su'][w]).join(','):t('allDays')}`
+      : `${c.interval_minutes} min`;
     const scope=[c.security_patch?'patch':null,c.app_update?('app:'+c.app_update):null].filter(Boolean).join(' + ')||'—';
-    const snapOn=c.snapshot&&c.snapshot.enabled;
-    const ret=`${c.keep>0?('keep '+c.keep):'∞'}${c.max_age_days>0?(' · '+c.max_age_days+'d'):''}${snapOn?` · 📷 ${c.snapshot.prefix}${c.snapshot.dryrun?' (dry)':''}`:''}`;
+    const hc=c.health_check||{};const hcChip=hc.type&&hc.type!=='none'?`<span class="chip idle">${hc.type==='http'?'http':'systemd'}</span>`:'';
+    const snapsN=g.snapshots!=null?g.snapshots:'—';
+    const ret=`keep ${c.keep>0?c.keep:'∞'} · ${snapsN}`;
     const queued=(!g.running&&QMAP[g.vmid])?` <span class="qtag">⏳ ${t('queued')}</span>`:'';
-    const last=g.running
-      ? `<span class="spin"></span> <span class="muted">${g.running.kind}…</span>`
-      : (r?`<span class="${r.status==='ok'?'ok':'bad'}">${r.status}</span> <span class="muted">${(r.ts||'').slice(0,16).replace('T',' ')}</span>${queued}`:'<span class="muted">—</span>'+queued);
-    const tr=document.createElement('tr');
-    if(g.running) tr.className='running';
-    tr.innerHTML=`<td>${g.vmid}</td><td>${g.name||''}</td>
-      <td><span class="tag">${g.status}</span></td>
-      <td>${c.enabled?sched:'<span class="muted">'+t('disabled')+'</span>'}</td>
-      <td>${scope}</td><td>${ret}</td><td>${last}</td>
+    let last;
+    if(g.running)last=`<span class="run"><span class="spin"></span> ${t('running')}</span>`;
+    else if(g.blocked_no_backup)last=`<span class="chip warn">${t('blockedNoBackup')}</span>`;
+    else if(r)last=`<span class="chip ${r.status==='ok'?'good':'crit'}">${r.status==='ok'?'OK':(r.status==='rollback'?'↺ rollback':r.status)}</span> <span class="muted mono">${(r.ts||'').slice(11,16)}</span>${queued}`;
+    else last=`<span class="muted">—</span>${queued}`;
+    const tr=document.createElement('tr');tr.dataset.vmid=g.vmid;
+    if(g.blocked_no_backup||(r&&r.status!=='ok'))tr.className='rowwarn';
+    tr.innerHTML=`
+      <td><div class="gname"><span class="nm">${g.name||''}</span><span class="id">${g.vmid}</span></div></td>
+      <td><span class="os">${osIcon(g.os)} ${g.os||('<span class="muted">'+g.status+'</span>')}</span></td>
+      <td>${backupChip(g)}</td>
+      <td><span class="snaps">${ret}</span></td>
+      <td>${c.enabled?`<span class="mono">${sched}</span>`:`<span class="muted">${t('disabled')}</span>`}</td>
+      <td><span class="chip idle">${scope}</span> ${hcChip}</td>
+      <td>${last}</td>
       <td class="acts">
         <button data-act="snapshot" title="${t('snapNow')}">📷</button>
         <button data-act="update" title="${t('updNow')}">🔄</button>
         <button data-act="purge" title="${t('purgeNow')}">🗑</button>
         <button data-act="edit">${t('edit')}</button></td>`;
-    tr.querySelectorAll('[data-act]').forEach(b=>b.onclick=()=>rowAction(b.dataset.act,g));
+    tr.querySelectorAll('[data-act]').forEach(b=>b.onclick=e=>{e.stopPropagation();rowAction(b.dataset.act,g);});
     rows.appendChild(tr);
   }
 }
 
-// ---- ad-hoc actions (single + bulk) ----
+async function load(){
+  const [d,q]=await Promise.all([
+    fetch('/api/guests').then(r=>r.json()),
+    fetch('/api/queue').then(r=>r.json()).catch(()=>({queue:[]}))]);
+  SET=d.settings||{};HU=d.host_update||{};
+  const QMAP={};for(const j of (q.queue||[]))QMAP[j.ctid]=true;
+  d._queue=QMAP;DATA=d;
+  el('nodeName').textContent=(d.host&&d.host.pve)?d.host.pve:'PVE';
+  render();
+}
+
+// ---------- ad-hoc actions ----------
 async function postAction(action,vmids){
-  const res=await fetch('/api/actions',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({action,vmids})});
-  const d=await res.json().catch(()=>({}));
-  if(d.queued!=null) alert(`${t('queuedN')} ${d.queued}`);
-  else alert(t('nothingQueued'));
-  load();
+  const d=await fetch('/api/actions',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({action,vmids})}).then(r=>r.json()).catch(()=>({}));
+  alert(d.queued!=null?`${t('queuedN')} ${d.queued}`:t('nothingQueued'));load();
 }
 function rowAction(act,g){
-  if(act==='edit') return edit(g);
-  if(act==='snapshot'){ if(!confirm(`${t('confirmSnap')} ${g.vmid}?`)) return; }
-  if(act==='update'){ if(!confirm(`${t('confirmUpd')} ${g.vmid}?`)) return; }
-  if(act==='purge'){ if(!confirm(`${t('confirmPurge')} ${g.vmid}${t('keepManual')}`)) return; }
+  if(act==='edit')return edit(g);
+  if(act==='snapshot'&&!confirm(`${t('confirmSnap')} ${g.vmid}?`))return;
+  if(act==='update'&&!confirm(`${t('confirmUpd')} ${g.vmid}?`))return;
+  if(act==='purge'&&!confirm(`${t('confirmPurge')} ${g.vmid}${t('keepManual')}`))return;
   postAction(act,[g.vmid]);
 }
-function allVmids(){return [...el('rows').querySelectorAll('tr')].map(tr=>+tr.firstElementChild.textContent).filter(Boolean);}
+const allVmids=()=>[...el('rows').querySelectorAll('tr')].map(tr=>+tr.dataset.vmid).filter(Boolean);
 el('bulkSnap').onclick=()=>{const v=allVmids();if(v.length&&confirm(t('confirmSnapAll')))postAction('snapshot',v);};
 el('bulkUpd').onclick=()=>{const v=allVmids();if(v.length&&confirm(t('confirmUpdAll')))postAction('update',v);};
 el('bulkPurge').onclick=()=>{const v=allVmids();if(v.length&&confirm(t('confirmPurgeAll')))postAction('purge',v);};
 
-// ---- schedule planner ----
+// ---------- host update dialog ----------
+function openHost(){el('hEnabled').checked=!!HU.enabled;el('hMode').value=HU.mode||'calendar';
+  el('hTime').value=(HU.times||['02:00'])[0];el('hDays').value=(HU.weekdays||[]).join(',');
+  el('hInterval').value=HU.interval_minutes||10080;toggleHostMode();el('hdlg').showModal();}
+function toggleHostMode(){const cal=el('hMode').value==='calendar';el('hCal').style.display=cal?'':'none';el('hInt').style.display=cal?'none':'';}
+el('hMode').onchange=toggleHostMode;
+el('hSave').onclick=async()=>{
+  await fetch('/api/host-update',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({enabled:el('hEnabled').checked,mode:el('hMode').value,times:[el('hTime').value.trim()],
+      weekdays:el('hDays').value.split(',').map(x=>x.trim()).filter(x=>x!=='').map(Number),
+      interval_minutes:+el('hInterval').value||10080})});
+  el('hdlg').close();load();};
+el('hostbar').onclick=openHost;
+
+// ---------- planner dialog ----------
 let PLAN=null;
 el('proposeBtn').onclick=()=>{el('mApply').disabled=true;el('mPreview').innerHTML='';PLAN=null;el('sdlg').showModal();};
-el('mPropose').onclick=async()=>{
+async function doPropose(){
   await fetch('/api/maintenance',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({window_start:el('mStart').value.trim(),window_end:el('mEnd').value.trim(),
       weekdays:[Math.max(0,Math.min(6,+el('mDay').value||6))],
       spacing_min:Math.max(1,+el('mSpace').value||20),concurrency:Math.max(1,+el('mConc').value||1)})});
-  const p=await (await fetch('/api/schedule/propose')).json();
-  PLAN=p; renderPlan(p);
-};
-function renderPlan(p){
-  const box=el('mPreview');
-  if(!p.plan.length){box.innerHTML=`<p class="muted">${t('noFresh')}</p>`;el('mApply').disabled=true;return;}
+  PLAN=await fetch('/api/schedule/propose').then(r=>r.json());return PLAN;
+}
+el('mPropose').onclick=async()=>{renderPlan(await doPropose(),el('mPreview'),el('mApply'));};
+function renderPlan(p,box,applyBtn){
+  if(!p.plan.length){box.innerHTML=`<p class="muted">${t('noFresh')}</p>`;if(applyBtn)applyBtn.disabled=true;return;}
   const zones=(p.forbidden||[]).map(z=>`${z.start}–${z.end}`).join(', ')||'—';
-  const rows=p.plan.map(it=>`<tr><td>${it.vmid}</td><td>${it.name||''}</td><td><b>${it.time}</b></td></tr>`).join('');
-  const un=(p.unplaceable||[]).length?`<p class="zone bad">${t('unplaceableLbl')}: ${p.unplaceable.join(', ')}</p>`:'';
+  const rows=p.plan.map(it=>`<div class="r"><span>${it.name||''} <span class="muted mono">${it.vmid}</span></span><b class="mono">${it.time}</b></div>`).join('');
+  const un=(p.unplaceable||[]).length?`<p class="note" style="color:var(--crit)">${t('unplaceableLbl')}: ${p.unplaceable.join(', ')}</p>`:'';
   box.innerHTML=`<b>${t('planPreview')}</b> <span class="muted">(${p.capacity.placed} ${t('placedWord')})</span>
-    <div class="scroll" style="max-height:34vh;margin-top:.4rem"><table><tbody>${rows}</tbody></table></div>
-    <p class="zone">${t('forbiddenZones')}: ${zones}</p>${un}`;
-  el('mApply').disabled=false;
+    <div class="covlist" style="margin-top:.4rem">${rows}</div>
+    <p class="note">${t('forbiddenZones')}: ${zones}</p>${un}`;
+  if(applyBtn)applyBtn.disabled=false;
 }
-el('mApply').onclick=async()=>{
-  if(!PLAN||!PLAN.plan.length) return;
-  const d=await (await fetch('/api/schedule/apply',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({plan:PLAN.plan,weekday:PLAN.weekday})})).json();
-  alert(`${t('appliedN')} ${(d.applied||[]).length}`);
-  el('sdlg').close(); load();
-};
+async function applyPlan(p){
+  const d=await fetch('/api/schedule/apply',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({plan:p.plan,weekday:p.weekday})}).then(r=>r.json());
+  return (d.applied||[]).length;
+}
+el('mApply').onclick=async()=>{if(!PLAN||!PLAN.plan.length)return;const n=await applyPlan(PLAN);
+  alert(`${t('appliedN')} ${n}`);el('sdlg').close();load();};
+
+// ---------- edit guest ----------
 function edit(g){
-  const c=g.config;
-  el('dTitle').textContent=`CT ${g.vmid} — ${g.name||''}`;
-  el('dEnabled').checked=c.enabled; el('dMode').value=c.mode;
-  el('dTime').value=(c.times||['03:30'])[0]; el('dDays').value=(c.weekdays||[]).join(',');
-  el('dInterval').value=c.interval_minutes; el('dSec').checked=c.security_patch;
-  el('dApp').value=c.app_update||''; el('dSnap').checked=c.pre_snapshot;
-  el('dKeep').value=c.keep; el('dAge').value=c.max_age_days;
-  const hc=c.health_check||{}; el('dHcType').value=hc.type||'none'; el('dHcArg').value=hc.arg||'';
-  const s=c.snapshot||{};
-  el('sEnabled').checked=!!s.enabled; el('sMode').value=s.mode||'calendar';
-  el('sTime').value=(s.times||['02:00'])[0]; el('sDays').value=(s.weekdays||[]).join(',');
-  el('sInterval').value=s.interval_minutes||1440; el('sPrefix').value=s.prefix||'auto';
-  el('sKeep').value=s.keep!=null?s.keep:3; el('sAge').value=s.max_age_days!=null?s.max_age_days:0; el('sDry').checked=!!s.dryrun;
-  toggleMode(); toggleSnapMode(); el('dSave').onclick=()=>save(g.vmid); el('dlg').showModal();
+  const c=g.config;el('dTitle').textContent=`CT ${g.vmid} — ${g.name||''}`;
+  el('dEnabled').checked=c.enabled;el('dMode').value=c.mode;
+  el('dTime').value=(c.times||['03:30'])[0];el('dDays').value=(c.weekdays||[]).join(',');
+  el('dInterval').value=c.interval_minutes;el('dSec').checked=c.security_patch;
+  el('dApp').value=c.app_update||'';el('dSnap').checked=c.pre_snapshot;
+  el('dKeep').value=c.keep;el('dAge').value=c.max_age_days;
+  const hc=c.health_check||{};el('dHcType').value=hc.type||'none';el('dHcArg').value=hc.arg||'';
+  const s=c.snapshot||{};el('sEnabled').checked=!!s.enabled;el('sMode').value=s.mode||'calendar';
+  el('sTime').value=(s.times||['02:00'])[0];el('sDays').value=(s.weekdays||[]).join(',');
+  el('sInterval').value=s.interval_minutes||1440;el('sPrefix').value=s.prefix||'auto';
+  el('sKeep').value=s.keep!=null?s.keep:3;el('sAge').value=s.max_age_days!=null?s.max_age_days:0;el('sDry').checked=!!s.dryrun;
+  toggleMode();toggleSnapMode();el('dSave').onclick=()=>save(g.vmid);el('dlg').showModal();
 }
-function toggleMode(){const cal=el('dMode').value==='calendar';el('calBox').style.display=cal?'':'none';el('intBox').style.display=cal?'none':''}
-function toggleSnapMode(){const cal=el('sMode').value==='calendar';el('sCal').style.display=cal?'':'none';el('sInt').style.display=cal?'none':''}
-el('dMode').onchange=toggleMode; el('sMode').onchange=toggleSnapMode;
+function toggleMode(){const cal=el('dMode').value==='calendar';el('calBox').style.display=cal?'':'none';el('intBox').style.display=cal?'none':'';}
+function toggleSnapMode(){const cal=el('sMode').value==='calendar';el('sCal').style.display=cal?'':'none';el('sInt').style.display=cal?'none':'';}
+el('dMode').onchange=toggleMode;el('sMode').onchange=toggleSnapMode;
 async function save(vmid){
-  const body={enabled:el('dEnabled').checked,mode:el('dMode').value,
-    times:[el('dTime').value.trim()],
+  const body={enabled:el('dEnabled').checked,mode:el('dMode').value,times:[el('dTime').value.trim()],
     weekdays:el('dDays').value.split(',').map(x=>x.trim()).filter(x=>x!=='').map(Number),
-    interval_minutes:+el('dInterval').value||10080,
-    security_patch:el('dSec').checked,app_update:el('dApp').value.trim()||null,
-    pre_snapshot:el('dSnap').checked,
+    interval_minutes:+el('dInterval').value||10080,security_patch:el('dSec').checked,
+    app_update:el('dApp').value.trim()||null,pre_snapshot:el('dSnap').checked,
     keep:Math.max(0,+el('dKeep').value||0),max_age_days:Math.max(0,+el('dAge').value||0),
     health_check:{type:el('dHcType').value,arg:el('dHcArg').value.trim()},
-    snapshot:{enabled:el('sEnabled').checked,mode:el('sMode').value,
-      times:[el('sTime').value.trim()],
+    snapshot:{enabled:el('sEnabled').checked,mode:el('sMode').value,times:[el('sTime').value.trim()],
       weekdays:el('sDays').value.split(',').map(x=>x.trim()).filter(x=>x!=='').map(Number),
-      interval_minutes:+el('sInterval').value||1440,
-      prefix:el('sPrefix').value.trim()||'auto',
-      keep:Math.max(0,+el('sKeep').value||0),max_age_days:Math.max(0,+el('sAge').value||0),
-      dryrun:el('sDry').checked}};
+      interval_minutes:+el('sInterval').value||1440,prefix:el('sPrefix').value.trim()||'auto',
+      keep:Math.max(0,+el('sKeep').value||0),max_age_days:Math.max(0,+el('sAge').value||0),dryrun:el('sDry').checked}};
   let res=await fetch('/api/guests/'+vmid,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  if(res.status===409){
-    const d=await res.json();
-    const w=d.window||{};
-    if(!confirm(`${d.time} ${t('collideMsg')} (${w.start}–${w.end}). ${t('forceQ')}`)) return;
-    body.force=true;
-    res=await fetch('/api/guests/'+vmid,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  }
-  el('dlg').close(); load();
+  if(res.status===409){const d=await res.json();const w=d.window||{};
+    if(!confirm(`${d.time} ${t('collideMsg')} (${w.start}–${w.end}). ${t('forceQ')}`))return;
+    body.force=true;res=await fetch('/api/guests/'+vmid,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});}
+  el('dlg').close();load();
 }
-el('pauseBtn').onclick=async()=>{await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({paused:!SET.paused})});load()};
-el('logout').onclick=async()=>{await fetch('/api/logout',{method:'POST'});location.href='/login'};
+el('pauseBtn').onclick=async()=>{await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({paused:!SET.paused})});load();};
+el('logout').onclick=async()=>{await fetch('/api/logout',{method:'POST'});location.href='/login';};
 
-// ---- log ----
+// ---------- log ----------
 async function loadLog(){
-  const box=el('logbox'), sc=box.parentElement;
+  const box=el('logbox'),sc=box.parentElement;
   const atBottom=sc.scrollTop+sc.clientHeight>=sc.scrollHeight-30;
-  const d=await (await fetch('/api/log')).json();
+  const d=await fetch('/api/log').then(r=>r.json());
   box.textContent=d.log||t('empty');
   el('logMeta').textContent=t('logMeta')+' · '+new Date().toLocaleTimeString();
-  if(atBottom) sc.scrollTop=sc.scrollHeight;
+  if(atBottom)sc.scrollTop=sc.scrollHeight;
 }
-function startLogAuto(){stopLogAuto();if(el('logAuto').checked)logTimer=setInterval(loadLog,5000)}
-function stopLogAuto(){if(logTimer){clearInterval(logTimer);logTimer=null}}
+function startLogAuto(){stopLogAuto();if(el('logAuto').checked)logTimer=setInterval(loadLog,5000);}
+function stopLogAuto(){if(logTimer){clearInterval(logTimer);logTimer=null;}}
 el('logRefresh').onclick=loadLog;
 el('logAuto').onchange=()=>el('logAuto').checked?startLogAuto():stopLogAuto();
 
+// ---------- WIZARD ----------
+let WSTEP=1;const WSCOPE={sec:true,app:'',hc:'none'};
+el('openWiz').onclick=()=>{WSTEP=1;el('wiz').showModal();renderWiz();};
+el('wizClose').onclick=()=>{localStorage.setItem('au_wizard_done','1');el('wiz').close();};
+el('wizBack').onclick=()=>{if(WSTEP>1){WSTEP--;renderWiz();}};
+el('wizNext').onclick=async()=>{
+  if(WSTEP===3&&!PLAN){await doPropose();}       // ensure a proposal exists
+  if(WSTEP<5){WSTEP++;renderWiz();return;}
+  await wizFinish();
+};
+function renderWizSteps(){
+  const labels=['st1','st2','st3','st4','st5'];
+  el('wizSteps').innerHTML=labels.map((k,i)=>`<span class="step ${i+1===WSTEP?'on':(i+1<WSTEP?'done':'')}">${t(k)}</span>`).join('');
+  el('wizBack').disabled=WSTEP===1;
+  el('wizNext').textContent=[null,t('next2'),t('next3'),t('next4'),t('next5'),t('wizApplyPlan')][WSTEP];
+}
+function renderWiz(){
+  renderWizSteps();const g=DATA.guests||[],inv=DATA.inventory||{},b=el('wizBody');
+  const total=g.length,fresh=g.filter(x=>x.backup&&x.backup.fresh).length;
+  const noBk=g.filter(x=>!(x.backup&&x.backup.info));
+  const snapsTotal=g.reduce((s,x)=>s+(x.snapshots||0),0);
+  const freshH=SET.backup_fresh_hours||24;
+  const node=(DATA.host&&DATA.host.pve)?DATA.host.pve:'PVE';
+  if(WSTEP===1){
+    const win=(inv.windows||[])[0];
+    b.innerHTML=`<p style="color:var(--ink-dim)">${t('wizScanLead',{n:`<b class="mono">${node}</b>`})}</p>
+      <div class="scan">
+        <div class="scancard"><div class="n mono">${total}</div><div class="l">${t('scLxc')}</div></div>
+        <div class="scancard"><div class="n mono">${fresh}&nbsp;/&nbsp;${total}</div><div class="l">${t('scFresh',{h:freshH})}</div></div>
+        <div class="scancard"><div class="n mono">${snapsTotal}</div><div class="l">${t('scSnaps')}</div></div>
+        <div class="scancard"><div class="n mono" style="color:${noBk.length?'var(--crit)':'var(--good)'}">${noBk.length}</div><div class="l">${t('scNoBk')}</div></div>
+      </div>
+      ${win?`<div class="prop"><div class="row"><b>${t('wizWinFound',{w:fmtMin(win.start_min)+'–'+fmtMin(win.end_min)})}</b><span class="toggle">${t('wizAvoiding')}</span></div>
+        <div class="note">${t('ribbonHint').replace(/^—\s*/,'')}</div></div>`
+      :`<div class="prop"><div class="note">${t('wizWinNone')}</div></div>`}
+      ${noBk.length?`<div class="prop"><div class="row"><b>${noBk.map(x=>x.name+' ('+x.vmid+')').join(', ')}</b><span class="toggle" style="color:var(--warn);background:var(--warn-bg)">${t('wizNoBkList')}</span></div><div class="note">${t('wizNoBkNote')}</div></div>`:''}`;
+  }else if(WSTEP===2){
+    const rows=g.map(x=>{const bk=x.backup||{};const st=bk.info?(bk.fresh?`<span class="chip good">${t('fresh')}</span>`:`<span class="chip warn">${t('stale')}</span>`):`<span class="chip crit">${t('none')}</span>`;
+      return `<div class="r"><span>${x.name} <span class="muted mono">${x.vmid}</span> <span class="os">${osIcon(x.os)} ${x.os||''}</span></span>${st}</div>`;}).join('');
+    b.innerHTML=`<p style="color:var(--ink-dim)">${t('wizCovLead')}</p><div class="covlist">${rows}</div>`;
+  }else if(WSTEP===3){
+    b.innerHTML=`<p style="color:var(--ink-dim)">${t('wizSchedLead')}</p>
+      <div class="grid2"><div><label class="thin" data-i18n="winStart">${t('winStart')}</label><input type="text" id="wStart" value="${el('mStart').value||'01:30'}"></div>
+      <div><label class="thin" data-i18n="winEnd">${t('winEnd')}</label><input type="text" id="wEnd" value="${el('mEnd').value||'05:00'}"></div></div>
+      <div class="grid2"><div><label class="thin">${t('maintDay')}</label><input type="number" id="wDay" min="0" max="6" value="${el('mDay').value||6}"></div>
+      <div><label class="thin">${t('spacing')}</label><input type="number" id="wSpace" min="1" value="${el('mSpace').value||20}"></div></div>
+      <div style="display:flex;gap:.5rem;margin-top:.8rem"><button class="btn primary" id="wPropose">${t('propose')}</button></div>
+      <div id="wPreview" style="margin-top:.8rem"></div>`;
+    el('wPropose').onclick=async()=>{
+      el('mStart').value=el('wStart').value;el('mEnd').value=el('wEnd').value;el('mDay').value=el('wDay').value;el('mSpace').value=el('wSpace').value;
+      renderPlan(await doPropose(),el('wPreview'),null);};
+    if(PLAN)renderPlan(PLAN,el('wPreview'),null);
+  }else if(WSTEP===4){
+    b.innerHTML=`<p style="color:var(--ink-dim)">${t('wizScopeLead')}</p>
+      <div class="row" style="margin-top:.4rem"><input type="checkbox" id="wSec" ${WSCOPE.sec?'checked':''}><label style="margin:0">${t('wizScopeSec')}</label></div>
+      <label class="thin" style="margin-top:.7rem">${t('wizScopeApp')}</label><input type="text" id="wApp" value="${WSCOPE.app}" placeholder="update">
+      <label class="thin" style="margin-top:.7rem">${t('wizScopeHc')}</label>
+      <select id="wHc"><option value="none">${t('hcNone')}</option><option value="systemd">systemd is-active</option><option value="http">HTTP curl -f</option></select>`;
+    el('wHc').value=WSCOPE.hc;
+  }else if(WSTEP===5){
+    b.innerHTML=`<p style="color:var(--ink-dim)">${t('wizNotifLead')}</p><div class="prop"><div class="note">${t('wizNotifNote')}</div></div>
+      ${!PLAN||!PLAN.plan.length?`<p class="note" style="color:var(--warn)">${t('wizNoPlan')}</p>`:''}`;
+  }
+}
+async function wizFinish(){
+  // capture scope choices from step 4 if present
+  if(el('wSec'))WSCOPE.sec=el('wSec').checked;
+  if(el('wApp'))WSCOPE.app=el('wApp').value.trim();
+  if(el('wHc'))WSCOPE.hc=el('wHc').value;
+  if(!PLAN||!PLAN.plan.length){alert(t('wizNoPlan'));WSTEP=3;renderWiz();return;}
+  await applyPlan(PLAN);
+  // apply default scope/health to the scheduled (fresh-backup) guests; times already
+  // validated by the planner, so force past the collision guard.
+  for(const it of PLAN.plan){
+    const g=(DATA.guests||[]).find(x=>x.vmid===it.vmid);const cur=g?g.config:{};
+    await fetch('/api/guests/'+it.vmid,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({...cur,enabled:true,mode:'calendar',times:[it.time],weekdays:[PLAN.weekday],
+        security_patch:WSCOPE.sec,app_update:WSCOPE.app||null,pre_snapshot:true,
+        health_check:{type:WSCOPE.hc,arg:(cur.health_check||{}).arg||''},force:true})});
+  }
+  localStorage.setItem('au_wizard_done','1');
+  el('wiz').close();alert(t('wizApplyDone'));load();
+}
+
+// ---------- boot ----------
 applyLang(LANG);
+load().then(()=>{if(!localStorage.getItem('au_wizard_done')){WSTEP=1;el('wiz').showModal();renderWiz();}});
 startGuestsAuto();
 </script>
 </body>
