@@ -104,8 +104,8 @@
 
   /* per-row schedule gantt */
   .gantt{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--r);padding:14px 16px 12px}
-  .grow{display:grid;grid-template-columns:150px 1fr;align-items:center;column-gap:12px}
-  .gantt-axis{margin-left:162px;display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--ink-mute);
+  .grow{display:grid;grid-template-columns:172px 1fr;align-items:center;column-gap:12px}
+  .gantt-axis{margin-left:184px;display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--ink-mute);
               border-bottom:1px solid var(--border-soft);padding-bottom:5px;margin-bottom:4px}
   .gantt-rows{display:flex;flex-direction:column}
   .grow{padding:5px 0;border-bottom:1px solid var(--border-soft)}
@@ -420,8 +420,10 @@ const I18N={
     ribbonTitle:'Service window',ribbonHint:'— the two anchors: the host update and its backup window; LXCs are laid out around them',
     legBackup:'Backup (never schedule here)',legHost:'Host update',legGuest:'LXC update',legSnap:'Snapshot: create → prune',
     windowTab:'Service window',machinesTitle:'LXC machines',rowHint:'click = details / policy',
-    ganttBackup:'Backup window',ganttDaily:'daily',ganttHostRow:'Host update',ganttNoSched:'not scheduled',
+    ganttBackup:'Backup window',ganttDaily:'daily',ganttHostRow:'Host update',ganttNoSched:'not scheduled',ganttOffWindow:'outside the night window',
     ganttSnapC:'📷 snapshot',ganttSnapP:'🗑 prune',ganttNoEnabled:'No LXC has an update schedule yet — use “Plan schedule”.',
+    wizHostTitle:'PVE host update (the second anchor)',wizHostEnable:'Update the PVE host on a schedule',
+    wizHostNote:'When the host itself updates. If it shares the LXC day the planner keeps machines clear of it; the command stays host-side (host.conf).',
     kManaged:'Managed',kManagedS:'of {n} LXC on host',kCurrent:'Up to date',kCurrentS:'after last run',
     kPending:'Pending',kPendingS:'scheduled soon',kProblems:'Problems',kProblemsS:'rollback / health-check',
     kCoverage:'Backup coverage',kCoverageS:'{a} / {b} have a fresh copy',kNext:'Next run',kNextS:'{n} machines',kNextNone:'no run',
@@ -479,8 +481,10 @@ const I18N={
     ribbonTitle:'Okno serwisowe',ribbonHint:'— dwa filary: aktualizacja hosta i jego okno backupu; LXC układane wokół nich',
     legBackup:'Backup (nie planuj tu aktualizacji)',legHost:'Aktualizacja hosta',legGuest:'Aktualizacja LXC',legSnap:'Migawka: utworzenie → prune',
     windowTab:'Okno serwisowe',machinesTitle:'Maszyny LXC',rowHint:'klik = szczegóły / edycja polityki',
-    ganttBackup:'Okno backupu',ganttDaily:'codziennie',ganttHostRow:'Aktualizacja hosta',ganttNoSched:'brak harmonogramu',
+    ganttBackup:'Okno backupu',ganttDaily:'codziennie',ganttHostRow:'Aktualizacja hosta',ganttNoSched:'brak harmonogramu',ganttOffWindow:'poza oknem nocnym',
     ganttSnapC:'📷 migawka',ganttSnapP:'🗑 prune',ganttNoEnabled:'Żaden LXC nie ma jeszcze harmonogramu — użyj „Zaplanuj harmonogram".',
+    wizHostTitle:'Aktualizacja hosta PVE (drugi filar)',wizHostEnable:'Aktualizuj hosta PVE wg harmonogramu',
+    wizHostNote:'Kiedy aktualizuje się sam host. Jeśli to ten sam dzień co LXC, planer trzyma maszyny z dala od tego slotu; komenda pozostaje po stronie hosta (host.conf).',
     kManaged:'Zarządzane',kManagedS:'z {n} LXC na hoście',kCurrent:'Aktualne',kCurrentS:'po ostatnim runie',
     kPending:'Oczekują',kPendingS:'zaplanowane wkrótce',kProblems:'Problemy',kProblemsS:'rollback / health-check',
     kCoverage:'Pokrycie backupem',kCoverageS:'{a} / {b} ma świeżą kopię',kNext:'Najbliższy run',kNextS:'{n} maszyn',kNextNone:'brak runu',
@@ -667,14 +671,21 @@ function renderGantt(d){
     html+=`<div class="grow"><div class="glabel off"><span class="nm">—</span></div>${track(`<span class="gempty">${t('ganttNoEnabled')}</span>`)}</div>`;
   }
   for(const g of gs){
-    const l=ribPct(g.m), segW=Math.max(3,mPct(20));           // ~20 min nominal run
-    const labelLeft=Math.min(88,l+segW+0.6);
-    let inner='';
-    // independent scheduled snapshot (autosnap), a real separate event -> orange tick
-    if(g.snap!=null&&inAxis(g.snap))inner+=`<div class="gsnap" style="left:${ribPct(g.snap)}%" title="📷 ${fmtMin(g.snap)}"></div>`;
-    // the run: orange snapshot cap · azure update · orange prune cap
-    inner+=`<div class="gseg" title="📷→🔄→🗑 ${fmtMin(g.m)}" style="left:${l}%;width:max(34px,${segW}%)"><span class="cap"></span><span class="upd"></span><span class="cap"></span></div>`;
-    inner+=`<span class="glbl" style="left:${labelLeft}%">${fmtMin(g.m)}${g.keep>0?' · keep '+g.keep:''}</span>`;
+    let inner;
+    const keepTxt=g.keep>0?' · keep '+g.keep:'';
+    if(!inAxis(g.m)){
+      // schedule falls outside the night axis (e.g. a daytime time) — flag it, don't draw a broken off-screen bar
+      inner=`<span class="gempty" style="color:var(--warn)">⚠ ${fmtMin(g.m)} — ${t('ganttOffWindow')}${keepTxt}</span>`;
+    }else{
+      const l=ribPct(g.m), segW=Math.max(2.8,mPct(20));       // ~20 min nominal run
+      const labelLeft=Math.min(84,l+Math.max(segW,2.8)+0.8);
+      inner='';
+      // independent scheduled snapshot (autosnap), a real separate event -> orange tick
+      if(g.snap!=null&&inAxis(g.snap))inner+=`<div class="gsnap" style="left:${ribPct(g.snap)}%" title="📷 ${fmtMin(g.snap)}"></div>`;
+      // the run: orange snapshot cap · azure update · orange prune cap
+      inner+=`<div class="gseg" title="📷→🔄→🗑 ${fmtMin(g.m)}" style="left:${l}%;width:max(34px,${segW}%)"><span class="cap"></span><span class="upd"></span><span class="cap"></span></div>`;
+      inner+=`<span class="glbl" style="left:${labelLeft}%">${fmtMin(g.m)}${keepTxt}</span>`;
+    }
     html+=`<div class="grow"><div class="glabel"><span class="nm">${g.name}</span><span class="id">${g.vmid}</span><span class="day">${wdList(g.wds)}</span></div>${track(inner)}</div>`;
   }
   el('ganttRows').innerHTML=html;
@@ -872,8 +883,16 @@ let WSTEP=1;const WSCOPE={sec:true,app:'auto',reboot:false,hc:'auto'};
 el('openWiz').onclick=()=>{WSTEP=1;el('wiz').showModal();renderWiz();};
 el('wizClose').onclick=()=>{localStorage.setItem('au_wizard_done','1');el('wiz').close();};
 el('wizBack').onclick=()=>{if(WSTEP>1){WSTEP--;renderWiz();}};
+async function applyWizHost(){
+  if(!el('wHostEn'))return;
+  const body={enabled:el('wHostEn').checked,mode:'calendar',
+    times:[el('wHostTime').value.trim()||'02:00'],
+    weekdays:[Math.max(0,Math.min(6,+el('wHostDay').value||5))],interval_minutes:10080};
+  HU=body;
+  await fetch('/api/host-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+}
 el('wizNext').onclick=async()=>{
-  if(WSTEP===3&&!PLAN){await doPropose();}       // ensure a proposal exists
+  if(WSTEP===3){await applyWizHost(); if(!PLAN)await doPropose();}   // save host anchor + ensure a proposal exists
   if(WSTEP<5){WSTEP++;renderWiz();return;}
   await wizFinish();
 };
@@ -913,10 +932,20 @@ function renderWiz(){
       <div><label class="thin" data-i18n="winEnd">${t('winEnd')}</label><input type="text" id="wEnd" value="${el('mEnd').value||'05:00'}"></div></div>
       <div class="grid2"><div><label class="thin">${t('maintDay')}</label><input type="number" id="wDay" min="0" max="6" value="${el('mDay').value||6}"></div>
       <div><label class="thin">${t('spacing')}</label><input type="number" id="wSpace" min="1" value="${el('mSpace').value||20}"></div></div>
-      <div style="display:flex;gap:.5rem;margin-top:.8rem"><button class="btn primary" id="wPropose">${t('propose')}</button></div>
+      <hr>
+      <label>${t('wizHostTitle')}</label>
+      <div class="row" style="margin-top:.2rem"><input type="checkbox" id="wHostEn"><label style="margin:0">${t('wizHostEnable')}</label></div>
+      <div class="grid2"><div><label class="thin">${t('timeLbl')}</label><input type="text" id="wHostTime"></div>
+      <div><label class="thin">${t('maintDay')}</label><input type="number" id="wHostDay" min="0" max="6"></div></div>
+      <p class="note">${t('wizHostNote')}</p>
+      <div style="display:flex;gap:.5rem;margin-top:.6rem"><button class="btn primary" id="wPropose">${t('propose')}</button></div>
       <div id="wPreview" style="margin-top:.8rem"></div>`;
+    el('wHostEn').checked=!!HU.enabled;
+    el('wHostTime').value=(HU.times||['02:00'])[0];
+    el('wHostDay').value=(HU.weekdays&&HU.weekdays.length)?HU.weekdays[0]:5;
     el('wPropose').onclick=async()=>{
       el('mStart').value=el('wStart').value;el('mEnd').value=el('wEnd').value;el('mDay').value=el('wDay').value;el('mSpace').value=el('wSpace').value;
+      await applyWizHost();
       renderPlan(await doPropose(),el('wPreview'),null);};
     if(PLAN)renderPlan(PLAN,el('wPreview'),null);
   }else if(WSTEP===4){
