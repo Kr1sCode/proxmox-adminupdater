@@ -104,11 +104,20 @@ def build_app_update(cfg, ctid, app, distro="debian"):
     # and a clean skip (exit 0) when the CT is not a helper-script container.
     if app == "auto":
         shell = "ash" if distro == "alpine" else "bash"
+        # Run `update` with stdin from /dev/null and its output redirected to a FILE,
+        # not our capture pipe. Community-scripts updaters often (re)start the app as
+        # a daemon that would inherit our stdout pipe and keep it open -> the executor
+        # would block reading until exec_timeout. Redirecting to a file means any
+        # daemon inherits the file fd, and we just `tail` the file back afterwards.
+        # A guest-side `timeout` also caps a genuinely stuck updater.
+        to = "" if shell == "ash" else "timeout 1500 "  # busybox timeout differs; skip on alpine
         script = (
             "command -v update >/dev/null 2>&1 || "
             "{ echo 'brak /usr/bin/update — nie jest to kontener community-scripts, pomijam'; exit 0; }; "
             "mkdir -p /tmp/.nc; printf '#!/bin/sh\\n:\\n' > /tmp/.nc/clear; chmod +x /tmp/.nc/clear; "
-            "export PATH=/tmp/.nc:$PATH; export TERM=dumb; export PHS_SILENT=1; update"
+            "export PATH=/tmp/.nc:$PATH; export TERM=dumb; export PHS_SILENT=1; "
+            f"{to}update </dev/null >/tmp/.au-upd.log 2>&1; rc=$?; "
+            "tail -c 8000 /tmp/.au-upd.log 2>/dev/null; rm -f /tmp/.au-upd.log; exit $rc"
         )
         return [shell, "-lc", script]
     if not _safe_name(app):
