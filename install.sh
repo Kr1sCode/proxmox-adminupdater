@@ -286,6 +286,10 @@ tls_insecure   = false
 # Raport e-mail przez pocztę hosta (Proxmox postfix). notify_on: always|errors|never
 notify_email   =
 notify_on      = errors
+# Aktualizacja samego hosta PVE (druga bramka: domyślnie off). Komenda po stronie hosta.
+host_update      = off
+host_update_cmd  = apt update && apt --yes --no-new-pkgs upgrade
+host_update_log  = /var/log/proxmox-apt-upgrade.log
 EOF
   chmod 600 /etc/proxmox-adminupdater/host.conf
 fi

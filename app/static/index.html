@@ -144,6 +144,22 @@
   </div>
 </dialog>
 
+<dialog id="hdlg">
+  <h3 style="margin:.2rem 0 0" data-i18n="hostTitle">PVE host update</h3>
+  <div class="row" style="margin-top:.6rem"><input type="checkbox" id="hEnabled"><label style="margin:0" data-i18n="hEnabled">Enable scheduled host update</label></div>
+  <label data-i18n="schedMode">Schedule mode</label>
+  <select id="hMode"><option value="calendar" data-i18n="calendar">Calendar (days/time)</option><option value="interval" data-i18n="interval">Interval</option></select>
+  <div id="hCal" class="grid2">
+    <div><label data-i18n="timeLbl">Time (HH:MM)</label><input type="text" id="hTime" value="02:00"></div>
+    <div><label data-i18n="daysLbl">Days (0=Mon…6=Sun, empty=daily)</label><input type="text" id="hDays" value="5"></div>
+  </div>
+  <div id="hInt" style="display:none"><label data-i18n="everyMinLbl">Every N minutes</label><input type="number" id="hInterval" value="10080"></div>
+  <p class="muted" style="font-size:.8rem;margin-top:.6rem" data-i18n="hostNote">The command is defined host-side (host.conf → host_update_cmd) and needs host_update=on there.</p>
+  <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1.2rem">
+    <button onclick="hdlg.close()" data-i18n="cancel">Cancel</button><button class="primary" id="hSave" data-i18n="save">Save</button>
+  </div>
+</dialog>
+
 <script>
 const el=id=>document.getElementById(id);
 let SET={};
@@ -163,7 +179,9 @@ const I18N={
     snapSched:'Snapshot schedule',snapHint:'(independent of updates, auto_ prefix)',
     mode:'Mode',prefix:'Prefix',keepShort:'Keep newest',ageShort:'Delete older than (days)',dryrun:'Dry-run',
     cancel:'Cancel',save:'Save',
-    pveHost:'PVE host',hUpdates:'updates pending',hUpToDate:'up to date',hReboot:'reboot required after update',hUnknown:'update status unknown (waiting for host)'},
+    pveHost:'PVE host',hUpdates:'updates pending',hUpToDate:'up to date',hReboot:'reboot required after update',hUnknown:'update status unknown (waiting for host)',
+    hostTitle:'PVE host update',hEnabled:'Enable scheduled host update',hLast:'last',
+    hostNote:'The command is defined host-side (host.conf → host_update_cmd) and needs host_update=on there.'},
   pl:{containers:'Kontenery',log:'Log',logout:'Wyloguj',pause:'⏸ Pauza globalna',resume:'▶ Wznów',pauseTag:'PAUZA',
     thCT:'CT',thName:'Nazwa',thStatus:'Status',thSchedule:'Harmonogram',thScope:'Zakres',thRetention:'Retencja',thLast:'Ostatnio',
     edit:'Edytuj',disabled:'wyłączony',allDays:'wsz.',daysWord:'dni',
@@ -177,7 +195,9 @@ const I18N={
     snapSched:'Harmonogram migawek',snapHint:'(niezależny od aktualizacji, prefix auto_)',
     mode:'Tryb',prefix:'Prefix',keepShort:'Trzymaj ostatnie',ageShort:'Kasuj starsze niż (dni)',dryrun:'Dry-run',
     cancel:'Anuluj',save:'Zapisz',
-    pveHost:'Host PVE',hUpdates:'aktualizacji do zainstalowania',hUpToDate:'aktualny',hReboot:'wymagany restart po aktualizacji',hUnknown:'status nieznany (czekam na hosta)'}
+    pveHost:'Host PVE',hUpdates:'aktualizacji do zainstalowania',hUpToDate:'aktualny',hReboot:'wymagany restart po aktualizacji',hUnknown:'status nieznany (czekam na hosta)',
+    hostTitle:'Aktualizacja hosta PVE',hEnabled:'Włącz zaplanowaną aktualizację hosta',hLast:'ostatnio',
+    hostNote:'Komenda jest po stronie hosta (host.conf → host_update_cmd) i wymaga host_update=on.'}
 };
 let LANG=localStorage.getItem('au_lang')||'en';
 const t=k=>(I18N[LANG]&&I18N[LANG][k])||(I18N.en[k])||k;
@@ -210,19 +230,40 @@ document.querySelectorAll('nav .tab').forEach(b=>b.onclick=()=>{
 });
 
 // ---- PVE host update banner ----
+let HU={};
 function renderHostbar(h){
-  const hb=el('hostbar'); hb.style.display='block';
+  const hb=el('hostbar'); hb.style.display='block'; hb.style.cursor='pointer';
   const pve=h&&h.pve?` — ${h.pve}`:'';
-  if(h&&h.reboot){hb.className='reboot';hb.textContent=`⚠️ ${t('pveHost')}: ${t('hReboot')}${pve}`;}
-  else if(h&&h.pending>0){hb.className='pending';hb.textContent=`⬆️ ${t('pveHost')}: ${h.pending} ${t('hUpdates')}${pve}`;}
-  else if(h&&h.pending===0){hb.className='clean';hb.textContent=`✔ ${t('pveHost')}: ${t('hUpToDate')}${pve}`;}
-  else {hb.className='unknown';hb.textContent=`${t('pveHost')}: ${t('hUnknown')}`;}
+  const lr=h&&h.last?` · ${t('hLast')}: ${(h.last.ts||'').slice(0,16).replace('T',' ')} ${h.last.status}`:'';
+  const sched=HU.enabled?' ⏱':'';
+  if(h&&h.reboot){hb.className='reboot';hb.textContent=`⚠️ ${t('pveHost')}: ${t('hReboot')}${pve}${lr}${sched}`;}
+  else if(h&&h.pending>0){hb.className='pending';hb.textContent=`⬆️ ${t('pveHost')}: ${h.pending} ${t('hUpdates')}${pve}${lr}${sched}`;}
+  else if(h&&h.pending===0){hb.className='clean';hb.textContent=`✔ ${t('pveHost')}: ${t('hUpToDate')}${pve}${lr}${sched}`;}
+  else {hb.className='unknown';hb.textContent=`${t('pveHost')}: ${t('hUnknown')}${sched}`;}
 }
+function openHost(){
+  el('hEnabled').checked=!!HU.enabled; el('hMode').value=HU.mode||'calendar';
+  el('hTime').value=(HU.times||['02:00'])[0]; el('hDays').value=(HU.weekdays||[]).join(',');
+  el('hInterval').value=HU.interval_minutes||10080;
+  toggleHostMode(); el('hdlg').showModal();
+}
+function toggleHostMode(){const cal=el('hMode').value==='calendar';el('hCal').style.display=cal?'':'none';el('hInt').style.display=cal?'none':''}
+el('hMode').onchange=toggleHostMode;
+el('hSave').onclick=async()=>{
+  const body={enabled:el('hEnabled').checked,mode:el('hMode').value,
+    times:[el('hTime').value.trim()],
+    weekdays:el('hDays').value.split(',').map(x=>x.trim()).filter(x=>x!=='').map(Number),
+    interval_minutes:+el('hInterval').value||10080};
+  await fetch('/api/host-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  el('hdlg').close(); load();
+};
+el('hostbar').onclick=openHost;
 
 // ---- guests ----
 async function load(){
   const d=await (await fetch('/api/guests')).json();
   SET=d.settings;
+  HU=d.host_update||{};
   renderHostbar(d.host);
   el('pauseBtn').textContent=SET.paused?t('resume'):t('pause');
   el('pausetag').innerHTML=SET.paused?`<span class="tag pause">${t('pauseTag')}</span>`:'';

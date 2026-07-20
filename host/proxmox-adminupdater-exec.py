@@ -45,6 +45,11 @@ def load_cfg():
         "notify_email": g.get("notify_email", "").strip(),
         "notify_on": g.get("notify_on", "errors").strip().lower(),   # always | errors | never
         "notify_from": g.get("notify_from", "adminupdater@" + os.uname().nodename).strip(),
+        # PVE host self-update (defence in depth: must be enabled host-side too)
+        "host_update": g.getboolean("host_update", False),
+        "host_update_cmd": g.get("host_update_cmd",
+                                 "apt update && apt --yes --no-new-pkgs upgrade"),
+        "host_update_log": g.get("host_update_log", "/var/log/proxmox-apt-upgrade.log"),
     }
 
 
@@ -179,9 +184,31 @@ def _rollback_verdict(snap, job, ctid, timeout):
     return "failed"
 
 
+def do_host_update(cfg):
+    """Update the PVE host itself. The command comes from host.conf (host-trusted),
+    never from the plan. Gated by host_update=on (a compromised LXC can request it
+    but the host still refuses unless opted in). No snapshot — it's the hypervisor."""
+    res = {"kind": "host-update", "ts": datetime.now(timezone.utc).isoformat(),
+           "snapshot": None, "steps": [], "pruned": [], "reboot": False}
+    if not cfg.get("host_update"):
+        return {**res, "status": "rejected",
+                "steps": [{"action": "host-update", "status": "rejected", "rc": -1,
+                           "log": "host_update wyłączony w host.conf"}]}
+    log = cfg["host_update_log"]
+    full = f"({cfg['host_update_cmd']}) >> {shlex.quote(log)} 2>&1"
+    rc, out = run(["bash", "-lc", full], cfg["timeout"])
+    res["reboot"] = os.path.exists("/var/run/reboot-required")
+    res["steps"].append({"action": "host-update", "status": ("ok" if rc == 0 else "failed"),
+                         "rc": rc, "log": (out or "")[-2000:]})
+    res["status"] = "ok" if rc == 0 else "failed"
+    return res
+
+
 def do_job(cfg, job):
-    ctid = int(job["ctid"])
     kind = job.get("kind", "update")
+    if kind == "host-update":
+        return do_host_update(cfg)
+    ctid = int(job["ctid"])
     prefix = job.get("snapshot_prefix", "preupd")
     res = {"ctid": ctid, "kind": kind, "ts": datetime.now(timezone.utc).isoformat(),
            "snapshot": None, "steps": [], "pruned": []}
@@ -288,10 +315,11 @@ def build_email_html(results, host):
             for s in r.get("steps", []))
         pruned = r.get("pruned") or []
         prune = f" · pruned {len(pruned)}" if pruned else ""
+        label = "PVE host" if r.get("kind") == "host-update" else f"CT {r.get('ctid')}"
         cards.append(
             f"<div style='border:1px solid #e2e8f0;border-radius:10px;margin:10px 0;overflow:hidden'>"
             f"<div style='background:{col};color:#fff;padding:8px 12px;font-weight:700'>"
-            f"CT {r['ctid']} · {r.get('kind', 'update')} · {str(r['status']).upper()}</div>"
+            f"{label} · {r.get('kind', 'update')} · {str(r['status']).upper()}</div>"
             f"<div style='padding:8px 12px;font-size:13px;color:#334155'>"
             f"<div>snapshot: <code>{r.get('snapshot') or '—'}</code>{prune}</div>"
             f"<table style='border-collapse:collapse;margin-top:6px'>{steps}</table></div></div>")
@@ -348,6 +376,8 @@ def maybe_notify(cfg, results):
 
 def ping_progress(cfg, job):
     """Best-effort: tell the LXC we're starting this guest (drives the spinner)."""
+    if "ctid" not in job:   # host-update has no ctid
+        return
     try:
         http(cfg, "/progress", "POST",
              {"ctid": int(job["ctid"]), "kind": job.get("kind", "update")})

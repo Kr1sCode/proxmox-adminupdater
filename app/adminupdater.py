@@ -122,6 +122,13 @@ def compute_plan():
                 "max_age_days": int(s["max_age_days"]),
                 "dryrun": bool(s["dryrun"]),
             })
+
+    # --- HOST UPDATE job: update the PVE host itself (own clock in _host).
+    hu = host_update_settings(cfg)
+    if hu["enabled"]:
+        last_host = state.get(HOST_KEY, {}).get("last_run", 0)
+        if core.is_due(hu, last_host, now):
+            jobs.append({"kind": "host-update"})
     return jobs
 
 
@@ -130,12 +137,19 @@ def record_report(results):
     state = core.load_state()
     now = int(time.time())
     for r in results:
-        vmid = str(r.get("ctid"))
-        entry = state.get(vmid, {})
         kind = r.get("kind", "update")
         rec = {"kind": kind, "status": r.get("status"), "snapshot": r.get("snapshot"),
                "ts": r.get("ts"), "steps": r.get("steps", []),
-               "pruned": r.get("pruned", [])}
+               "pruned": r.get("pruned", []), "reboot": r.get("reboot", False)}
+        if kind == "host-update":
+            hs = state.get(HOST_KEY, {})
+            hs["last_run"] = now
+            hs["last"] = rec
+            state[HOST_KEY] = hs
+            core.log(f"host-update -> {r.get('status')} reboot={r.get('reboot', False)}")
+            continue
+        vmid = str(r.get("ctid"))
+        entry = state.get(vmid, {})
         if kind == "snapshot":
             entry["last_snap_run"] = now
             entry["last_snap"] = rec
@@ -155,14 +169,34 @@ def record_report(results):
 
 
 RUNNING_STALE = 2 * 3600   # a "running" marker older than this is treated as dead
-HOST_KEY = "_host"         # state slot for the PVE host's own update status
+HOST_KEY = "_host"         # state slot for the PVE host's own update status + schedule
+
+# Schedule for updating the PVE host itself. The ACTUAL command lives host-side
+# in host.conf (host_update_cmd) — the panel only decides timing + enable, never
+# ships a command. Weekday default 5 = Saturday (Mon=0..Sun=6), matching the
+# typical "Sat 02:00" host cron.
+HOST_UPDATE_DEFAULTS = {
+    "enabled": False,
+    "mode": "calendar",
+    "interval_minutes": 10080,
+    "times": ["02:00"],
+    "weekdays": [5],
+}
+
+
+def host_update_settings(cfg):
+    h = dict(HOST_UPDATE_DEFAULTS)
+    h.update(cfg.get("host_update") or {})
+    return h
 
 
 def set_host_status(data):
-    """Store the PVE host's update status (pending count, reboot flag, version),
-    posted by the host executor. Drives the top banner."""
+    """Merge the PVE host's update status (pending count, reboot flag, version)
+    posted by the host executor. Merges so it never clobbers last_run/last."""
     state = core.load_state()
-    state[HOST_KEY] = dict(data or {})
+    hs = state.get(HOST_KEY, {})
+    hs.update(dict(data or {}))
+    state[HOST_KEY] = hs
     core.save_state(state)
     return {"ok": True}
 
@@ -199,7 +233,8 @@ def guest_view():
                     "config": guest_settings(cfg, vmid),
                     "report": st.get("last"), "report_snap": st.get("last_snap"),
                     "running": running})
-    return {"settings": cfg["settings"], "guests": out, "host": state.get(HOST_KEY)}
+    return {"settings": cfg["settings"], "guests": out,
+            "host": state.get(HOST_KEY), "host_update": host_update_settings(cfg)}
 
 
 if __name__ == "__main__":

@@ -74,7 +74,8 @@ def load_config():
     settings.update(cfg.get("settings", {}))
     auth = dict(DEFAULT_AUTH)
     auth.update(cfg.get("auth", {}))
-    return {"settings": settings, "guests": cfg.get("guests", {}), "auth": auth}
+    return {"settings": settings, "guests": cfg.get("guests", {}), "auth": auth,
+            "host_update": cfg.get("host_update", {})}
 
 
 def save_config(cfg):

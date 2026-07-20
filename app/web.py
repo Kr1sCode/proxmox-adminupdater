@@ -202,6 +202,20 @@ def api_settings():
     return jsonify({"ok": True, "settings": cfg["settings"]})
 
 
+@app.route("/api/host-update", methods=["POST"])
+def api_host_update():
+    body = request.get_json(force=True) or {}
+    cfg = core.load_config()
+    hu = dict(up.HOST_UPDATE_DEFAULTS)
+    hu.update(cfg.get("host_update") or {})
+    for k in up.HOST_UPDATE_DEFAULTS:
+        if k in body:
+            hu[k] = body[k]
+    cfg["host_update"] = hu
+    core.save_config(cfg)
+    return jsonify({"ok": True, "host_update": hu})
+
+
 @app.route("/api/log")
 def api_log():
     try:

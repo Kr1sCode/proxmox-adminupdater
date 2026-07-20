@@ -28,3 +28,10 @@ tls_insecure   = false
 notify_email   =
 notify_on      = errors
 # notify_from  = adminupdater@pve   (default: adminupdater@<hostname>)
+
+# Update the PVE HOST itself when the panel schedules it (second gate: OFF by
+# default, so a compromised panel LXC cannot upgrade the hypervisor on its own).
+# The command is host-side and trusted — the panel only decides the timing.
+host_update      = off
+host_update_cmd  = apt update && apt --yes --no-new-pkgs upgrade
+host_update_log  = /var/log/proxmox-apt-upgrade.log
