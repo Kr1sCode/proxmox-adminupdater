@@ -100,7 +100,38 @@
   .rlegend{display:flex;gap:16px;flex-wrap:wrap;margin-top:11px;font-size:12px;color:var(--ink-dim)}
   .rlegend span{display:inline-flex;gap:7px;align-items:center}
   .sw{width:11px;height:11px;border-radius:3px;display:inline-block}
-  .sw.backup{background:var(--crit)}.sw.hostu{background:var(--warn)}.sw.guest{background:var(--accent)}
+  .sw.backup{background:var(--crit)}.sw.hostu{background:var(--warn)}.sw.guest{background:var(--accent)}.sw.snap{background:#e08a2b}
+
+  /* per-row schedule gantt */
+  .gantt{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--r);padding:14px 16px 12px}
+  .grow{display:grid;grid-template-columns:150px 1fr;align-items:center;column-gap:12px}
+  .gantt-axis{margin-left:162px;display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--ink-mute);
+              border-bottom:1px solid var(--border-soft);padding-bottom:5px;margin-bottom:4px}
+  .gantt-rows{display:flex;flex-direction:column}
+  .grow{padding:5px 0;border-bottom:1px solid var(--border-soft)}
+  .grow:last-child{border-bottom:0}
+  .grow.ref{background:linear-gradient(90deg,var(--surface-2),transparent 70%);border-radius:6px}
+  .glabel{display:flex;align-items:baseline;gap:7px;font-size:12.5px;overflow:hidden;white-space:nowrap}
+  .glabel .nm{font-weight:600}.glabel .id{font-family:var(--mono);font-size:10px;color:var(--ink-mute)}
+  .glabel .day{font-family:var(--mono);font-size:10px;color:var(--ink-dim);margin-left:auto;padding-left:6px}
+  .glabel.off .nm{color:var(--ink-mute);font-weight:500}
+  .gtrack{position:relative;height:26px}
+  .gband{position:absolute;top:0;bottom:0;border-radius:3px}
+  .gband.backup{background:repeating-linear-gradient(45deg,rgba(242,112,111,.22),rgba(242,112,111,.22) 6px,rgba(200,90,89,.22) 6px,rgba(200,90,89,.22) 12px);
+                border-left:2px solid var(--crit);border-right:2px solid var(--crit)}
+  .gband.hostzone{background:rgba(245,179,1,.14);border-left:2px dashed var(--warn);border-right:2px dashed var(--warn)}
+  .gbar{position:absolute;top:4px;height:18px;border-radius:5px;display:flex;align-items:center;justify-content:center;
+        font-family:var(--mono);font-size:10.5px;font-weight:650;color:#04121f;padding:0 6px;white-space:nowrap;overflow:visible}
+  .gbar.update{background:var(--accent)}
+  .gbar.hostu{background:var(--warn)}
+  .gbar.backupbar{background:var(--crit);color:#fff}
+  /* LXC run: orange snapshot cap · azure update · orange prune cap, then a time label */
+  .gseg{position:absolute;top:4px;height:18px;display:flex;border-radius:5px;overflow:hidden;box-shadow:0 0 0 1px var(--surface)}
+  .gseg .cap{width:4px;flex:none;background:#e08a2b}
+  .gseg .upd{flex:1;min-width:22px;background:var(--accent)}
+  .glbl{position:absolute;top:6px;font-family:var(--mono);font-size:10.5px;color:var(--ink-dim);white-space:nowrap}
+  .gsnap{position:absolute;top:3px;bottom:3px;width:3px;border-radius:2px;background:#e08a2b;opacity:.85}
+  .gempty{font-size:11px;color:var(--ink-mute);line-height:26px;padding-left:2px}
 
   /* guest table */
   .panel{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--r);overflow:hidden}
@@ -193,13 +224,14 @@
 </div>
 
 <nav>
-  <button class="tab active" data-tab="guests" data-i18n="containers">Containers</button>
+  <button class="tab active" data-tab="window" data-i18n="windowTab">Service window</button>
+  <button class="tab" data-tab="guests" data-i18n="machinesTitle">LXC machines</button>
   <button class="tab" data-tab="log" data-i18n="log">Log</button>
 </nav>
 
 <main>
 <div class="wrap">
-  <section class="pane active" id="pane-guests">
+  <section class="pane active" id="pane-window">
     <div class="host unknown" id="hostbar" style="display:none">
       <span class="dot"></span><b data-i18n="pveHost">PVE host</b>
       <span class="meta" id="hostMeta"></span>
@@ -210,16 +242,19 @@
     <div class="kpis" id="kpis"></div>
 
     <div class="sec"><h2 data-i18n="ribbonTitle">Service window</h2><span class="hint" id="ribbonHint"></span></div>
-    <div class="ribbon">
-      <div class="track" id="track"></div>
-      <div class="ticks" id="ticks"></div>
+    <div class="gantt">
+      <div class="gantt-axis" id="ganttAxis"></div>
+      <div class="gantt-rows" id="ganttRows"></div>
       <div class="rlegend">
         <span><i class="sw backup"></i> <span data-i18n="legBackup">Backup (never schedule here)</span></span>
         <span><i class="sw hostu"></i> <span data-i18n="legHost">Host update</span></span>
-        <span><i class="sw guest"></i> <span data-i18n="legGuest">LXC updates (spread out)</span></span>
+        <span><i class="sw guest"></i> <span data-i18n="legGuest">LXC update</span></span>
+        <span><i class="sw snap"></i> <span data-i18n="legSnap">Snapshot: create → prune</span></span>
       </div>
     </div>
+  </section>
 
+  <section class="pane" id="pane-guests">
     <div class="sec"><h2 data-i18n="machinesTitle">LXC machines</h2><span class="sp"></span><span class="hint" data-i18n="rowHint">click = details / policy</span></div>
     <div class="toolbar">
       <button class="btn primary" id="proposeBtn" data-i18n="proposeBtn">📅 Plan schedule</button>
@@ -238,7 +273,6 @@
         <tbody id="rows"></tbody>
       </table>
     </div>
-
     <div class="foot" data-i18n="footNote">State colours (green/amber/red) carry meaning; azure accent is navigation only. Notifications: aggregate HTML report after each window + a separate alert only on rollback.</div>
   </section>
 
@@ -383,9 +417,11 @@ const I18N={
     thName:'Machine',thSystem:'System',thBackup:'Backup',thSnaps:'Snapshots',thSchedule:'Schedule',thScope:'Scope + health',thLast:'Last',
     edit:'Edit',disabled:'disabled',allDays:'daily',paused:'paused',
     refresh:'Refresh',autoLbl:'auto (5 s)',logMeta:'last 200 lines',empty:'(empty)',
-    ribbonTitle:'Service window',ribbonHint:'— jobs laid out to dodge the nightly backup',
-    legBackup:'Backup (never schedule here)',legHost:'Host update',legGuest:'LXC updates (spread out)',
-    machinesTitle:'LXC machines',rowHint:'click = details / policy',
+    ribbonTitle:'Service window',ribbonHint:'— the two anchors: the host update and its backup window; LXCs are laid out around them',
+    legBackup:'Backup (never schedule here)',legHost:'Host update',legGuest:'LXC update',legSnap:'Snapshot: create → prune',
+    windowTab:'Service window',machinesTitle:'LXC machines',rowHint:'click = details / policy',
+    ganttBackup:'Backup window',ganttDaily:'daily',ganttHostRow:'Host update',ganttNoSched:'not scheduled',
+    ganttSnapC:'📷 snapshot',ganttSnapP:'🗑 prune',ganttNoEnabled:'No LXC has an update schedule yet — use “Plan schedule”.',
     kManaged:'Managed',kManagedS:'of {n} LXC on host',kCurrent:'Up to date',kCurrentS:'after last run',
     kPending:'Pending',kPendingS:'scheduled soon',kProblems:'Problems',kProblemsS:'rollback / health-check',
     kCoverage:'Backup coverage',kCoverageS:'{a} / {b} have a fresh copy',kNext:'Next run',kNextS:'{n} machines',kNextNone:'no run',
@@ -440,9 +476,11 @@ const I18N={
     thName:'Maszyna',thSystem:'System',thBackup:'Backup',thSnaps:'Migawki',thSchedule:'Harmonogram',thScope:'Zakres + health',thLast:'Ostatnio',
     edit:'Edytuj',disabled:'wyłączony',allDays:'codz.',paused:'pauza',
     refresh:'Odśwież',autoLbl:'auto (5 s)',logMeta:'ostatnie 200 linii',empty:'(pusto)',
-    ribbonTitle:'Okno serwisowe',ribbonHint:'— zadania ułożone tak, by omijać nocny backup',
-    legBackup:'Backup (nie planuj tu aktualizacji)',legHost:'Aktualizacja hosta',legGuest:'Aktualizacje LXC (rozłożone)',
-    machinesTitle:'Maszyny LXC',rowHint:'klik = szczegóły / edycja polityki',
+    ribbonTitle:'Okno serwisowe',ribbonHint:'— dwa filary: aktualizacja hosta i jego okno backupu; LXC układane wokół nich',
+    legBackup:'Backup (nie planuj tu aktualizacji)',legHost:'Aktualizacja hosta',legGuest:'Aktualizacja LXC',legSnap:'Migawka: utworzenie → prune',
+    windowTab:'Okno serwisowe',machinesTitle:'Maszyny LXC',rowHint:'klik = szczegóły / edycja polityki',
+    ganttBackup:'Okno backupu',ganttDaily:'codziennie',ganttHostRow:'Aktualizacja hosta',ganttNoSched:'brak harmonogramu',
+    ganttSnapC:'📷 migawka',ganttSnapP:'🗑 prune',ganttNoEnabled:'Żaden LXC nie ma jeszcze harmonogramu — użyj „Zaplanuj harmonogram".',
     kManaged:'Zarządzane',kManagedS:'z {n} LXC na hoście',kCurrent:'Aktualne',kCurrentS:'po ostatnim runie',
     kPending:'Oczekują',kPendingS:'zaplanowane wkrótce',kProblems:'Problemy',kProblemsS:'rollback / health-check',
     kCoverage:'Pokrycie backupem',kCoverageS:'{a} / {b} ma świeżą kopię',kNext:'Najbliższy run',kNextS:'{n} maszyn',kNextNone:'brak runu',
@@ -527,6 +565,9 @@ const pad=n=>String(n).padStart(2,'0');
 const fmtMin=m=>`${pad(Math.floor(((m%1440)+1440)%1440/60))}:${pad(((m%60)+60)%60)}`;
 const hhmmToMin=s=>{const m=/^(\d{1,2}):(\d{2})$/.exec((s||'').trim());return m?(+m[1])*60+(+m[2]):null;};
 const pyWeekday=d=>((d.getDay()+6)%7); // JS Sun=0 -> Py Mon=0..Sun=6
+const WD={en:['Mo','Tu','We','Th','Fr','Sa','Su'],pl:['Pn','Wt','Śr','Cz','Pt','So','Nd']};
+const wd=i=>(WD[LANG]||WD.en)[i];
+const wdList=a=>(a&&a.length)?a.map(wd).join(','):t('allDays');
 const osIcon=n=>{n=(n||'').toLowerCase();if(!n)return '·';return n.includes('alpine')?'△':n.includes('arch')?'✦':'▲';};
 
 // nearest upcoming calendar run across enabled guests
@@ -552,7 +593,7 @@ function renderHostbar(h){
   const pve=h&&h.pve?h.pve:'';
   const lr=h&&h.last?` · ${t('hLast')}: ${(h.last.ts||'').slice(0,16).replace('T',' ')} ${h.last.status}`:'';
   const schedTxt=HU.enabled&&HU.mode==='calendar'
-    ? `${t('hostUpd')}: ${(HU.times||['02:00'])[0]}${(HU.weekdays||[]).length?' ('+(HU.weekdays||[]).map(w=>['Mo','Tu','We','Th','Fr','Sa','Su'][w]).join(',')+')':''}`
+    ? `${t('hostUpd')}: ${(HU.times||['02:00'])[0]}${(HU.weekdays||[]).length?' ('+wdList(HU.weekdays)+')':''}`
     : (HU.enabled?`${t('hostUpd')}: ⏱`:'');
   el('hostMeta').textContent=pve;
   el('hostPush').textContent=schedTxt+lr;
@@ -590,25 +631,53 @@ function renderKpis(g){
 const RIB_START=21*60,RIB_LEN=11*60; // 21:00 → 08:00
 const ribNorm=m=>(((m-RIB_START)%1440)+1440)%1440;
 function ribPct(m){return ribNorm(m)/RIB_LEN*100;}
-function renderRibbon(d){
-  const inv=d.inventory||{},track=el('track');let html='';
-  // backup windows (red hatched)
-  for(const w of (inv.windows||[])){
-    const l=ribPct(w.start_min);let width=(((w.end_min-w.start_min)%1440)+1440)%1440/RIB_LEN*100;
-    if(ribNorm(w.start_min)>RIB_LEN&&ribNorm(w.end_min)>RIB_LEN)continue;
-    width=Math.max(2,Math.min(width,100-l));
-    html+=`<div class="blk backup" style="left:${l}%;width:${width}%" title="backup ${fmtMin(w.start_min)}–${fmtMin(w.end_min)}">⚠ ${fmtMin(w.start_min)}–${fmtMin(w.end_min)}</div>`;
-  }
-  // host update slot (amber)
-  if(HU.enabled&&HU.mode==='calendar'){const hm=hhmmToMin((HU.times||['02:00'])[0]);
-    if(hm!=null&&ribNorm(hm)<=RIB_LEN)html+=`<div class="blk hostu" style="left:${ribPct(hm)}%;width:5%" title="host">host</div>`;}
-  // enabled guests (azure)
-  const gs=d.guests.filter(x=>x.config.enabled&&x.config.mode==='calendar'&&hhmmToMin((x.config.times||[])[0])!=null)
-    .map(x=>({name:x.name,m:hhmmToMin(x.config.times[0])})).filter(x=>ribNorm(x.m)<=RIB_LEN).sort((a,b)=>ribNorm(a.m)-ribNorm(b.m));
-  for(const x of gs)html+=`<div class="blk guest" style="left:${ribPct(x.m)}%;width:6%" title="${x.name} · ${fmtMin(x.m)}">${x.name}</div>`;
-  track.innerHTML=html||`<div style="padding:14px;color:var(--ink-mute);font-size:12px">${t('noWindows')}</div>`;
-  el('ticks').innerHTML=[0,2,4,6,8,10,11].map(h=>`<span>${fmtMin(RIB_START+h*60)}</span>`).join('');
+const mPct=m=>m/RIB_LEN*100;              // duration (minutes) -> % of the axis
+const inAxis=m=>ribNorm(m)<=RIB_LEN;
+function renderGantt(d){
+  const inv=d.inventory||{};
+  el('ganttAxis').innerHTML=[0,2,4,6,8,10,11].map(h=>`<span>${fmtMin(RIB_START+h*60)}</span>`).join('');
   el('ribbonHint').textContent=(inv.windows&&inv.windows.length)?t('ribbonHint'):'— '+t('noWindows');
+
+  // backup windows drawn as faint full-height bands inside EVERY track (aligned columns)
+  const bands=(inv.windows||[]).filter(w=>inAxis(w.start_min)||inAxis(w.end_min)).map(w=>{
+    const l=ribPct(w.start_min), width=Math.max(1.5,Math.min(mPct((((w.end_min-w.start_min)%1440)+1440)%1440),100-l));
+    return `<div class="gband backup" style="left:${l}%;width:${width}%"></div>`;
+  }).join('');
+  const track=inner=>`<div class="gtrack">${bands}${inner}</div>`;
+
+  let html='';
+  // --- anchor row 1: the backup window (daily) ---
+  const bw=(inv.windows||[])[0];
+  html+=`<div class="grow ref"><div class="glabel"><span class="nm">🗄 ${t('ganttBackup')}</span><span class="day">${t('ganttDaily')}</span></div>`+
+    track(bw?`<div class="gbar backupbar" style="left:${ribPct(bw.start_min)}%;width:${Math.max(6,mPct((((bw.end_min-bw.start_min)%1440)+1440)%1440))}%">${fmtMin(bw.start_min)}–${fmtMin(bw.end_min)}</div>`
+            :`<span class="gempty">${t('noWindows')}</span>`)+`</div>`;
+
+  // --- anchor row 2: the host update ---
+  const hostM=(HU.enabled&&HU.mode==='calendar')?hhmmToMin((HU.times||['02:00'])[0]):null;
+  html+=`<div class="grow ref"><div class="glabel"><span class="nm">🛡 ${t('ganttHostRow')}</span><span class="day">${hostM!=null?wdList(HU.weekdays||[]):t('ganttNoSched')}</span></div>`+
+    track((hostM!=null&&inAxis(hostM))?`<div class="gbar hostu" style="left:${ribPct(hostM)}%;width:${Math.max(6,mPct(30))}%">${fmtMin(hostM)}</div>`
+            :`<span class="gempty">${t('ganttNoSched')}</span>`)+`</div>`;
+
+  // --- one row per enabled LXC ---
+  const gs=d.guests.filter(x=>x.config.enabled&&x.config.mode==='calendar'&&hhmmToMin((x.config.times||[])[0])!=null)
+    .map(x=>{const c=x.config;const sn=(c.snapshot&&c.snapshot.enabled&&c.snapshot.mode==='calendar')?hhmmToMin((c.snapshot.times||[])[0]):null;
+             return {name:x.name,vmid:x.vmid,m:hhmmToMin(c.times[0]),wds:c.weekdays||[],keep:c.keep,snap:sn};})
+    .sort((a,b)=>ribNorm(a.m)-ribNorm(b.m));
+  if(!gs.length){
+    html+=`<div class="grow"><div class="glabel off"><span class="nm">—</span></div>${track(`<span class="gempty">${t('ganttNoEnabled')}</span>`)}</div>`;
+  }
+  for(const g of gs){
+    const l=ribPct(g.m), segW=Math.max(3,mPct(20));           // ~20 min nominal run
+    const labelLeft=Math.min(88,l+segW+0.6);
+    let inner='';
+    // independent scheduled snapshot (autosnap), a real separate event -> orange tick
+    if(g.snap!=null&&inAxis(g.snap))inner+=`<div class="gsnap" style="left:${ribPct(g.snap)}%" title="📷 ${fmtMin(g.snap)}"></div>`;
+    // the run: orange snapshot cap · azure update · orange prune cap
+    inner+=`<div class="gseg" title="📷→🔄→🗑 ${fmtMin(g.m)}" style="left:${l}%;width:max(34px,${segW}%)"><span class="cap"></span><span class="upd"></span><span class="cap"></span></div>`;
+    inner+=`<span class="glbl" style="left:${labelLeft}%">${fmtMin(g.m)}${g.keep>0?' · keep '+g.keep:''}</span>`;
+    html+=`<div class="grow"><div class="glabel"><span class="nm">${g.name}</span><span class="id">${g.vmid}</span><span class="day">${wdList(g.wds)}</span></div>${track(inner)}</div>`;
+  }
+  el('ganttRows').innerHTML=html;
 }
 
 // ---------- guest table ----------
@@ -623,7 +692,7 @@ function backupChip(g){
 function render(){
   if(!DATA.guests)return;
   const d=DATA;
-  renderHostbar(d.host);renderKpis(d.guests);renderRibbon(d);
+  renderHostbar(d.host);renderKpis(d.guests);renderGantt(d);
   el('pauseBtn').textContent=SET.paused?t('resume'):t('pause');
   el('pausewrap').innerHTML=SET.paused?`<span class="pausetag">${t('pauseTag')}</span>`:'';
   const QMAP=DATA._queue||{};
@@ -631,7 +700,7 @@ function render(){
   for(const g of d.guests){
     const c=g.config,r=g.report;
     const sched=c.mode==='calendar'
-      ? `${(c.times||[]).join(',')} · ${(c.weekdays||[]).length?(c.weekdays||[]).map(w=>['Mo','Tu','We','Th','Fr','Sa','Su'][w]).join(','):t('allDays')}`
+      ? `${(c.times||[]).join(',')} · ${wdList(c.weekdays||[])}`
       : `${c.interval_minutes} min`;
     const scope=[c.security_patch?'OS':null,c.app_update?('app:'+c.app_update):null].filter(Boolean).join(' + ')||'—';
     const hc=c.health_check||{};
