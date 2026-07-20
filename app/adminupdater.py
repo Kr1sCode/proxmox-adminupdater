@@ -9,6 +9,7 @@ guest can update on a fixed interval or on calendar days/times.
 import datetime as dt
 import re
 import time
+import uuid
 
 import core
 
@@ -68,6 +69,35 @@ def guest_settings(cfg, vmid):
     return g
 
 
+def build_update_job(g, vmid, sett):
+    """Assemble ONE update job (a single pre-snapshot covering security-patch,
+    then the app recipe, then the health-check). Shared by the scheduler and by
+    ad-hoc 'update now' so both go through the exact same, host-validated shape."""
+    actions = []
+    if g["security_patch"]:
+        actions.append("security-patch")
+    app = g.get("app_update")
+    if app and _APP_RE.match(str(app)):
+        actions.append("app-update")
+    elif app:
+        core.log(f"guest {vmid}: invalid app recipe {app!r} -> skipped")
+        app = None
+    if not actions:
+        return None
+    return {
+        "kind": "update",
+        "ctid": int(vmid),
+        "actions": actions,
+        "app": str(app) if app else None,
+        "pre_snapshot": bool(g["pre_snapshot"]),
+        "snapshot_prefix": sett["snapshot_prefix"],
+        "rollback_on_fail": bool(sett["rollback_on_fail"]),
+        "keep": int(g["keep"]),
+        "max_age_days": int(g["max_age_days"]),
+        "health_check": g["health_check"],
+    }
+
+
 def compute_plan():
     """Jobs due right now. Computed live -> the host timer is the clock; a run,
     once reported, sets last_run and stops being due (idempotent)."""
@@ -101,28 +131,9 @@ def compute_plan():
         if no_backup:
             core.log(f"guest {vmid}: brak świeżej kopii — auto-update wstrzymany (require_backup)")
         if due and not no_backup:
-            actions = []
-            if g["security_patch"]:
-                actions.append("security-patch")
-            app = g.get("app_update")
-            if app and _APP_RE.match(str(app)):
-                actions.append("app-update")
-            elif app:
-                core.log(f"guest {vmid}: invalid app recipe {app!r} -> skipped")
-                app = None
-            if actions:
-                jobs.append({
-                    "kind": "update",
-                    "ctid": int(vmid),
-                    "actions": actions,
-                    "app": str(app) if app else None,
-                    "pre_snapshot": bool(g["pre_snapshot"]),
-                    "snapshot_prefix": sett["snapshot_prefix"],
-                    "rollback_on_fail": bool(sett["rollback_on_fail"]),
-                    "keep": int(g["keep"]),
-                    "max_age_days": int(g["max_age_days"]),
-                    "health_check": g["health_check"],
-                })
+            job = build_update_job(g, vmid, sett)
+            if job:
+                jobs.append(job)
 
         # --- SNAPSHOT job: independent scheduled snapshot (autosnap-style),
         # separate clock: last_snap_run. Distinct prefix so retention families
@@ -151,8 +162,11 @@ def record_report(results):
     """Persist host-posted results; last_run per guest drives is_due()."""
     state = core.load_state()
     now = int(time.time())
+    done_qids = set()
     for r in results:
         kind = r.get("kind", "update")
+        if r.get("qid"):            # ad-hoc job finished -> drop it from the queue
+            done_qids.add(r["qid"])
         rec = {"kind": kind, "status": r.get("status"), "snapshot": r.get("snapshot"),
                "ts": r.get("ts"), "steps": r.get("steps", []),
                "pruned": r.get("pruned", []), "reboot": r.get("reboot", False)}
@@ -168,6 +182,8 @@ def record_report(results):
         if kind == "snapshot":
             entry["last_snap_run"] = now
             entry["last_snap"] = rec
+        elif kind == "purge":
+            entry["last_purge"] = rec   # ad-hoc: touches no schedule clock
         else:
             entry["last_run"] = now
             entry["last"] = rec
@@ -179,6 +195,9 @@ def record_report(results):
         pruned = r.get("pruned", [])
         prune_note = f" pruned={len(pruned)}" if pruned else ""
         core.log(f"{vmid} [{kind}] -> {r.get('status')} snap={r.get('snapshot')} [{step_summary}]{prune_note}")
+    if done_qids:
+        q = [j for j in state.get(QUEUE_KEY, []) if j.get("qid") not in done_qids]
+        state[QUEUE_KEY] = q
     core.save_state(state)
     return {"recorded": len(results)}
 
@@ -186,6 +205,7 @@ def record_report(results):
 RUNNING_STALE = 2 * 3600   # a "running" marker older than this is treated as dead
 HOST_KEY = "_host"         # state slot for the PVE host's own update status + schedule
 INVENTORY_KEY = "_inventory"   # fleet scan posted by the host executor
+QUEUE_KEY = "_queue"       # one-shot ad-hoc jobs (snapshot/purge/update now)
 
 
 def set_inventory(data):
@@ -197,6 +217,121 @@ def set_inventory(data):
 
 def get_inventory():
     return core.load_state().get(INVENTORY_KEY, {})
+
+
+# ---- ad-hoc job queue --------------------------------------------------------
+# One-shot actions a user triggers from the panel (snapshot / purge / update
+# "now"). They ride the SAME pull model: the panel appends jobs here, /plan hands
+# them to the host executor once, and the matching report removes them by qid.
+# Ad-hoc jobs deliberately bypass the backup-window defer (the user asked for it
+# explicitly); the host ctid whitelist still gates every one of them.
+
+def enqueue(jobs):
+    """Append one-shot jobs to the queue, each tagged with a unique qid."""
+    jobs = [jobs] if isinstance(jobs, dict) else list(jobs)
+    if not jobs:
+        return []
+    state = core.load_state()
+    q = state.get(QUEUE_KEY, [])
+    qids = []
+    for job in jobs:
+        j = dict(job)
+        j["qid"] = uuid.uuid4().hex[:12]
+        j["enqueued_at"] = int(time.time())
+        q.append(j)
+        qids.append(j["qid"])
+    state[QUEUE_KEY] = q
+    core.save_state(state)
+    return qids
+
+
+def take_queue():
+    """Return queued jobs ready to dispatch and mark them in-flight. A job is
+    re-dispatched only if a prior dispatch went stale (executor died mid-run)."""
+    state = core.load_state()
+    q = state.get(QUEUE_KEY, [])
+    if not q:
+        return []
+    now = int(time.time())
+    out, changed = [], False
+    for job in q:
+        d = job.get("dispatched_at", 0)
+        if d and now - d < RUNNING_STALE:
+            continue                       # still in flight
+        job["dispatched_at"] = now
+        changed = True
+        out.append({k: v for k, v in job.items() if k != "enqueued_at"})
+    if changed:
+        state[QUEUE_KEY] = q
+        core.save_state(state)
+    return out
+
+
+def queue_pending():
+    """UI view: what's still queued, per ctid (drives the 'queued' badge)."""
+    q = core.load_state().get(QUEUE_KEY, [])
+    return [{"ctid": j.get("ctid"), "kind": j.get("kind"),
+             "dispatched": bool(j.get("dispatched_at"))} for j in q]
+
+
+def enqueue_actions(action, vmids):
+    """Build + enqueue ad-hoc jobs for a list of ctids. Returns (qids, skipped)."""
+    cfg = core.load_config()
+    sett = cfg["settings"]
+    jobs, skipped = [], []
+    for vmid in vmids:
+        g = guest_settings(cfg, vmid)
+        if action == "snapshot":
+            s = g["snapshot"]
+            jobs.append({"kind": "snapshot", "ctid": int(vmid),
+                         "snapshot_prefix": s["prefix"], "keep": int(s["keep"]),
+                         "max_age_days": int(s["max_age_days"]), "dryrun": False})
+        elif action == "purge":
+            prefixes = sorted({sett["snapshot_prefix"], g["snapshot"]["prefix"]})
+            jobs.append({"kind": "purge", "ctid": int(vmid), "prefixes": prefixes})
+        elif action == "update":
+            job = build_update_job(g, vmid, sett)
+            if job:
+                jobs.append(job)
+            else:
+                skipped.append(int(vmid))   # nothing to do (no patch, no recipe)
+        else:
+            raise ValueError(f"unknown action {action!r}")
+    return enqueue(jobs), skipped
+
+
+def apply_schedule(plan, weekday):
+    """Write a proposed schedule back into guest configs: calendar mode, the
+    assigned time, the maintenance weekday, update enabled. Idempotent per guest."""
+    cfg = core.load_config()
+    applied = []
+    for item in plan or []:
+        vmid = str(item.get("vmid"))
+        tm = str(item.get("time", "")).strip()
+        if not _hhmm(tm):
+            continue
+        g = dict(GUEST_DEFAULTS)
+        g.update(cfg.get("guests", {}).get(vmid, {}))
+        g["enabled"] = True
+        g["mode"] = "calendar"
+        g["times"] = [tm]
+        g["weekdays"] = [int(weekday)]
+        cfg.setdefault("guests", {})[vmid] = g
+        applied.append(int(vmid))
+    if applied:
+        core.save_config(cfg)
+    return applied
+
+
+def save_maintenance(patch):
+    cfg = core.load_config()
+    m = maintenance_settings(cfg)
+    for k in MAINTENANCE_DEFAULTS:
+        if k in patch:
+            m[k] = patch[k]
+    cfg["maintenance"] = m
+    core.save_config(cfg)
+    return m
 
 
 def _now_minute(now_ts):
@@ -225,6 +360,114 @@ def guest_backup_fresh(vmid, inv, fresh_hours, now_ts):
         return 0 <= age < fresh_hours * 3600
     except (ValueError, KeyError):
         return False
+
+
+# ---- intelligent service-window planner --------------------------------------
+MAINTENANCE_DEFAULTS = {
+    "window_start": "01:30",   # updates may run from here...
+    "window_end": "05:00",     # ...to here
+    "weekdays": [6],           # Sunday (Mon=0..Sun=6)
+    "spacing_min": 20,         # gap between two guests (HDD: serialize)
+    "concurrency": 1,          # max guests updating at once (HDD default 1)
+}
+
+
+def maintenance_settings(cfg):
+    m = dict(MAINTENANCE_DEFAULTS)
+    m.update(cfg.get("maintenance") or {})
+    return m
+
+
+def _hhmm(s):
+    mt = re.match(r"^\s*(\d{1,2}):(\d{2})\s*$", str(s or ""))
+    return int(mt.group(1)) * 60 + int(mt.group(2)) if mt else None
+
+
+def _in_zone(minute, zones):
+    for s, e in zones:
+        inside = (s <= minute < e) if s <= e else (minute >= s or minute < e)
+        if inside:
+            return (s, e)
+    return None
+
+
+def forbidden_zones(cfg, inv, weekday):
+    """Minute ranges where NOTHING may be scheduled: every detected backup window
+    (daily, PBS + built-in vzdump alike) + the host-update slot on its weekday."""
+    zones = [(int(w["start_min"]), int(w["end_min"])) for w in inv.get("windows", [])]
+    hu = host_update_settings(cfg)
+    if hu.get("enabled") and hu.get("mode") == "calendar":
+        wds = hu.get("weekdays") or list(range(7))
+        if weekday in wds:
+            hs = _hhmm((hu.get("times") or ["02:00"])[0])
+            if hs is not None:
+                zones.append((hs, (hs + 30) % 1440))
+    return zones
+
+
+def time_in_backup_window(cfg, hhmm, inv=None):
+    """FOOLPROOF check: is this HH:MM inside a detected backup window? Used to
+    reject/warn manual schedule entries before they can ever run."""
+    inv = inv if inv is not None else get_inventory()
+    m = _hhmm(hhmm)
+    if m is None:
+        return None
+    for w in inv.get("windows", []):
+        s, e = int(w["start_min"]), int(w["end_min"])
+        if ((s <= m < e) if s <= e else (m >= s or m < e)):
+            return w
+    return None
+
+
+def propose_schedule(cfg, vmids=None):
+    """Place enrolled guests into conflict-free slots inside the maintenance
+    window, skipping every forbidden zone, spaced out, honouring concurrency."""
+    inv = get_inventory()
+    m = maintenance_settings(cfg)
+    ws, we = _hhmm(m["window_start"]), _hhmm(m["window_end"])
+    spacing = max(1, int(m["spacing_min"]))
+    conc = max(1, int(m["concurrency"]))
+    weekday = (m["weekdays"] or [6])[0]
+    zones = forbidden_zones(cfg, inv, weekday)
+
+    if vmids is None:  # default: every LXC with a fresh backup
+        now = int(time.time())
+        fh = int(cfg["settings"].get("backup_fresh_hours", 24))
+        vmids = sorted((v for v in (inv.get("guests") or {})
+                        if guest_backup_fresh(v, inv, fh, now)), key=int)
+    vmids = [str(v) for v in vmids]
+
+    lanes = [ws] * conc
+    assign, unplaceable = {}, []
+    for v in vmids:
+        placed = False
+        for _ in range(conc):
+            li = min(range(conc), key=lambda i: lanes[i])   # earliest-free lane
+            cur = lanes[li]
+            z = _in_zone(cur, zones)
+            while z and cur < we:                            # jump past forbidden zones
+                cur = z[1]
+                z = _in_zone(cur, zones)
+            if cur is not None and cur < we and not _in_zone(cur, zones):
+                assign[v] = cur
+                lanes[li] = cur + spacing
+                placed = True
+                break
+            lanes[li] = we                                   # this lane is full
+        if not placed:
+            unplaceable.append(int(v))
+
+    names = inv.get("guests") or {}
+    fmt = lambda mn: f"{(mn // 60) % 24:02d}:{mn % 60:02d}"
+    plan = [{"vmid": int(v), "name": names.get(v, {}).get("name", ""), "time": fmt(assign[v])}
+            for v in sorted(assign, key=lambda x: assign[x])]
+    slots = -(-(we - ws) // spacing) if (we is not None and ws is not None and we > ws) else 0  # ceil
+    return {
+        "maintenance": m, "weekday": weekday,
+        "forbidden": [{"start": fmt(s), "end": fmt(e)} for s, e in zones],
+        "plan": plan, "unplaceable": unplaceable,
+        "capacity": {"slots_estimate": slots, "requested": len(vmids), "placed": len(assign)},
+    }
 
 # Schedule for updating the PVE host itself. The ACTUAL command lives host-side
 # in host.conf (host_update_cmd) — the panel only decides timing + enable, never

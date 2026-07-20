@@ -100,6 +100,29 @@ Beyond pre-update snapshots, each guest has an **independent snapshot schedule**
 `keep`/`max_age_days` retention, and **dry-run**. So adminupdater covers both jobs
 — scheduled snapshots *and* scheduled updates — from one panel.
 
+## Schedule planner (fits updates around your backups)
+
+Rather than hand-picking a time per guest and hoping it doesn't clash with a
+backup, click **Plan schedule**. adminupdater reads the host's **learned backup
+windows** (from the vzdump/PBS jobs it already inventories) plus the host-update
+slot, then lays every enrolled guest into spaced slots inside a maintenance
+window — **skipping every blocked window**, honouring a per-guest **spacing** and
+a **concurrency** cap (default 1, i.e. serialize — kind to spinning disks).
+Preview the placement, then **Apply** to write it back to the guests.
+
+The same knowledge guards manual edits: saving a calendar time that lands inside
+a detected backup window is refused with a clear prompt (you can still force it).
+
+## Ad-hoc actions (do it now)
+
+Every row has one-click **Snapshot now**, **Update now**, and **Purge snapshots**;
+the toolbar has the bulk equivalents. These ride the same pull model — the panel
+enqueues a one-shot job, the host executor picks it up on its next tick (≤ a few
+minutes) and reports back, clearing it. **Purge** deletes only managed snapshots
+(`preupd_`/`auto_`, strict `name_YYYYMMDD_HHMMSS` match) — manual snapshots are
+physically safe. The host ctid whitelist gates ad-hoc jobs exactly like scheduled
+ones: a compromised LXC can *request*, never *force*.
+
 ## Email report (via the Proxmox host's mail)
 
 After each run the host executor can send a styled **HTML report** (per guest:

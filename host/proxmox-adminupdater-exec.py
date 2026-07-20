@@ -161,6 +161,27 @@ def prune_snapshots(ctid, prefix, keep, max_age_days):
     return deleted
 
 
+def purge_managed(ctid, prefixes):
+    """Delete ALL managed snapshots for the given prefixes. Same strict regex as
+    prune_snapshots -- only ^<prefix>_\\d{8}_\\d{6}$ can ever match, re-checked
+    right before each delete, so manual snapshots are physically safe."""
+    rc, out = run(["pct", "listsnapshot", str(ctid)], 60)
+    if rc != 0:
+        return [], "listsnapshot nieudany: " + out[-300:]
+    deleted = []
+    for prefix in prefixes:
+        if not _safe_name(prefix):
+            continue
+        rx = re.compile(r"^" + re.escape(prefix) + r"_\d{8}_\d{6}$")
+        for n in sorted({t for t in re.findall(r"[A-Za-z0-9_]+", out) if rx.match(t)}):
+            if not rx.match(n):        # belt-and-suspenders
+                continue
+            drc, _ = run(["pct", "delsnapshot", str(ctid), n], 120)
+            if drc == 0:
+                deleted.append(n)
+    return deleted, ""
+
+
 def build_health_check(hc):
     """Structured post-update probe -> a command, built HOST-side from a
     type+arg. No raw command string ever crosses from the LXC."""
@@ -218,6 +239,19 @@ def do_job(cfg, job):
         return {**res, "status": "rejected",
                 "steps": [{"action": kind, "status": "rejected", "rc": -1,
                            "log": "ctid poza whitelistą hosta"}]}
+
+    # ===== ad-hoc purge: drop ALL managed snapshots (never touches manual ones) =====
+    if kind == "purge":
+        deleted, err = purge_managed(ctid, job.get("prefixes") or [])
+        res["pruned"] = deleted
+        if err:
+            res.update(status="error",
+                       steps=[{"action": "purge", "status": "error", "rc": -1, "log": err}])
+            return res
+        res["steps"].append({"action": "purge", "status": "ok", "rc": 0,
+                             "log": f"usunięto {len(deleted)}: " + (", ".join(deleted) or "—")})
+        res["status"] = "ok"
+        return res
 
     # ===== independent scheduled snapshot job (autosnap-style) =====
     if kind == "snapshot":
@@ -581,6 +615,17 @@ def build_inventory():
             "windows": windows, "guests": guests}
 
 
+def scan_ok(inv):
+    """A scan is trustworthy only if it saw guests, and (when backup jobs exist)
+    at least one real backup. Prevents a timed-out pvesm/pct from clobbering good
+    data with an empty scan + a guessed window."""
+    if not inv.get("guests"):
+        return False
+    if inv.get("jobs") and not any(g.get("backup") for g in inv["guests"].values()):
+        return False
+    return True
+
+
 def maybe_refresh_inventory(cfg):
     """Throttled, best-effort. Never blocks jobs — called after report."""
     try:
@@ -589,6 +634,9 @@ def maybe_refresh_inventory(cfg):
     except OSError:
         pass
     inv = build_inventory()
+    if not scan_ok(inv):
+        print("inventory: skan niepełny (timeout?) — NIE nadpisuję dobrych danych")
+        return   # no stamp update -> retry on the next tick
     try:
         http(cfg, "/inventory", "POST", inv)
     except Exception as e:  # noqa: BLE001
@@ -605,7 +653,10 @@ def main():
     results = []
     for j in http(cfg, "/plan").get("jobs", []):
         ping_progress(cfg, j)
-        results.append(do_job(cfg, j))
+        r = do_job(cfg, j)
+        if j.get("qid"):        # echo so the brain can dequeue this ad-hoc job
+            r["qid"] = j["qid"]
+        results.append(r)
     if results:
         http(cfg, "/report", "POST", {"results": results})
         maybe_notify(cfg, results)

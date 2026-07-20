@@ -185,9 +185,64 @@ def api_guest_save(vmid):
     for k in up.GUEST_DEFAULTS:
         if k in body:
             g[k] = body[k]
+    # FOOLPROOF: refuse a schedule time that lands inside a detected backup
+    # window (PBS or built-in vzdump) unless the user explicitly forces it.
+    if g.get("enabled") and g.get("mode") == "calendar" and not body.get("force"):
+        for t in (g.get("times") or []):
+            win = up.time_in_backup_window(cfg, t)
+            if win:
+                # structured only — the UI localizes the message (EN/PL)
+                fmt = lambda m: f"{m // 60:02d}:{m % 60:02d}"
+                return jsonify({
+                    "error": "collision", "time": t,
+                    "window": {**win, "start": fmt(win["start_min"]),
+                               "end": fmt(win["end_min"])},
+                }), 409
     cfg.setdefault("guests", {})[str(vmid)] = g
     core.save_config(cfg)
     return jsonify({"ok": True, "config": g})
+
+
+@app.route("/api/schedule/propose")
+def api_schedule_propose():
+    return jsonify(up.propose_schedule(core.load_config()))
+
+
+@app.route("/api/schedule/apply", methods=["POST"])
+def api_schedule_apply():
+    body = request.get_json(force=True) or {}
+    applied = up.apply_schedule(body.get("plan"), body.get("weekday", 6))
+    return jsonify({"ok": True, "applied": applied})
+
+
+@app.route("/api/maintenance", methods=["POST"])
+def api_maintenance():
+    body = request.get_json(force=True) or {}
+    return jsonify({"ok": True, "maintenance": up.save_maintenance(body)})
+
+
+_ACTIONS = ("snapshot", "purge", "update")
+
+
+@app.route("/api/actions", methods=["POST"])
+def api_actions():
+    body = request.get_json(force=True) or {}
+    action = str(body.get("action", ""))
+    if action not in _ACTIONS:
+        return jsonify({"error": "unknown action"}), 400
+    try:
+        vmids = sorted({int(v) for v in (body.get("vmids") or [])})
+    except (TypeError, ValueError):
+        return jsonify({"error": "vmids must be integers"}), 400
+    if not vmids:
+        return jsonify({"error": "no vmids"}), 400
+    qids, skipped = up.enqueue_actions(action, vmids)
+    return jsonify({"ok": True, "queued": len(qids), "skipped": skipped})
+
+
+@app.route("/api/queue")
+def api_queue():
+    return jsonify({"queue": up.queue_pending()})
 
 
 @app.route("/api/settings", methods=["POST"])
@@ -232,8 +287,10 @@ def api_plan():
     if not _bearer_ok(request):
         return jsonify({"error": "unauthorized"}), 401
     import datetime as dt
+    # scheduled jobs (idempotent via last_run) + one-shot ad-hoc jobs from the queue
+    jobs = up.compute_plan() + up.take_queue()
     return jsonify({"generated_at": dt.datetime.utcnow().isoformat() + "Z",
-                    "jobs": up.compute_plan()})
+                    "jobs": jobs})
 
 
 @app.route("/report", methods=["POST"])

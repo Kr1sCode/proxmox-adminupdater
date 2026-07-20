@@ -45,6 +45,11 @@
   input[type=text],input[type=number],select{padding:.4rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;font:inherit;width:100%}
   .pause{color:#f59e0b}
   .bar{display:flex;gap:.5rem;align-items:center;padding:0 0 .6rem}
+  td.acts{white-space:nowrap;text-align:right}
+  td.acts button{padding:.3rem .45rem;margin-left:.25rem;line-height:1}
+  .qtag{font-size:.72rem;padding:.05rem .4rem;border-radius:99px;background:#f59e0b;color:#111827;font-weight:700}
+  #mPreview table{font-size:.85rem}
+  #mPreview .zone{font-size:.8rem;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -67,6 +72,13 @@
 
 <main>
   <section class="pane active" id="pane-guests">
+    <div class="bar">
+      <button class="primary" id="proposeBtn" data-i18n="proposeBtn">📅 Plan schedule</button>
+      <span class="sp"></span>
+      <button id="bulkSnap" data-i18n="bulkSnap">📷 Snapshot all</button>
+      <button id="bulkUpd" data-i18n="bulkUpd">🔄 Update all</button>
+      <button id="bulkPurge" data-i18n="bulkPurge">🗑 Purge all</button>
+    </div>
     <div class="scroll">
       <table>
         <thead><tr>
@@ -160,6 +172,29 @@
   </div>
 </dialog>
 
+<dialog id="sdlg">
+  <h3 style="margin:.2rem 0 .3rem" data-i18n="maintTitle">Maintenance window &amp; schedule</h3>
+  <p class="muted" style="font-size:.8rem;margin:0 0 .6rem" data-i18n="maintNote">Places enrolled containers into spaced slots inside the window, skipping every detected backup window and the host-update slot.</p>
+  <div class="grid2">
+    <div><label data-i18n="winStart">Window start (HH:MM)</label><input type="text" id="mStart" value="01:30"></div>
+    <div><label data-i18n="winEnd">Window end (HH:MM)</label><input type="text" id="mEnd" value="05:00"></div>
+  </div>
+  <div class="grid2">
+    <div><label data-i18n="maintDay">Day (0=Mon…6=Sun)</label><input type="number" id="mDay" min="0" max="6" value="6"></div>
+    <div><label data-i18n="spacing">Spacing (min)</label><input type="number" id="mSpace" min="1" value="20"></div>
+  </div>
+  <label data-i18n="concurrency">Max concurrent updates</label><input type="number" id="mConc" min="1" value="1">
+  <div style="display:flex;gap:.5rem;margin-top:.9rem">
+    <button class="primary" id="mPropose" data-i18n="propose">Propose</button>
+    <span class="sp"></span>
+    <button id="mApply" disabled data-i18n="applyPlan">Apply schedule</button>
+  </div>
+  <div id="mPreview" style="margin-top:.8rem"></div>
+  <div style="display:flex;justify-content:flex-end;margin-top:1rem">
+    <button onclick="sdlg.close()" data-i18n="cancel">Cancel</button>
+  </div>
+</dialog>
+
 <script>
 const el=id=>document.getElementById(id);
 let SET={};
@@ -181,7 +216,19 @@ const I18N={
     cancel:'Cancel',save:'Save',
     pveHost:'PVE host',hUpdates:'updates pending',hUpToDate:'up to date',hReboot:'reboot required after update',hUnknown:'update status unknown (waiting for host)',
     hostTitle:'PVE host update',hEnabled:'Enable scheduled host update',hLast:'last',
-    hostNote:'The command is defined host-side (host.conf → host_update_cmd) and needs host_update=on there.'},
+    hostNote:'The command is defined host-side (host.conf → host_update_cmd) and needs host_update=on there.',
+    proposeBtn:'📅 Plan schedule',bulkSnap:'📷 Snapshot all',bulkUpd:'🔄 Update all',bulkPurge:'🗑 Purge all',
+    snapNow:'Snapshot now',updNow:'Update now',purgeNow:'Purge snapshots',queued:'queued',
+    confirmSnapAll:'Take a snapshot now on every container?',confirmUpdAll:'Run updates now on every container? (containers with nothing to update are skipped)',
+    confirmPurgeAll:'Delete ALL managed snapshots (preupd_/auto_) on every container? Manual snapshots are kept.',
+    confirmSnap:'Take a snapshot now on CT',confirmUpd:'Run the update now on CT',
+    confirmPurge:'Delete ALL managed snapshots (preupd_/auto_) on CT',keepManual:'? Manual snapshots are kept.',
+    queuedN:'Queued jobs:',nothingQueued:'Nothing to queue.',
+    collideMsg:'falls inside the backup window',forceQ:'Save anyway?',
+    maintTitle:'Maintenance window & schedule',maintNote:'Places enrolled containers into spaced slots inside the window, skipping every detected backup window and the host-update slot.',
+    winStart:'Window start (HH:MM)',winEnd:'Window end (HH:MM)',maintDay:'Day (0=Mon…6=Sun)',spacing:'Spacing (min)',concurrency:'Max concurrent updates',
+    propose:'Propose',applyPlan:'Apply schedule',planPreview:'Proposed schedule',forbiddenZones:'Blocked windows (backups/host)',
+    unplaceableLbl:'No slot (window too small)',noFresh:'No containers with a fresh backup to schedule.',placedWord:'placed',appliedN:'Schedule applied to'},
   pl:{containers:'Kontenery',log:'Log',logout:'Wyloguj',pause:'⏸ Pauza globalna',resume:'▶ Wznów',pauseTag:'PAUZA',
     thCT:'CT',thName:'Nazwa',thStatus:'Status',thSchedule:'Harmonogram',thScope:'Zakres',thRetention:'Retencja',thLast:'Ostatnio',
     edit:'Edytuj',disabled:'wyłączony',allDays:'wsz.',daysWord:'dni',
@@ -197,7 +244,19 @@ const I18N={
     cancel:'Anuluj',save:'Zapisz',
     pveHost:'Host PVE',hUpdates:'aktualizacji do zainstalowania',hUpToDate:'aktualny',hReboot:'wymagany restart po aktualizacji',hUnknown:'status nieznany (czekam na hosta)',
     hostTitle:'Aktualizacja hosta PVE',hEnabled:'Włącz zaplanowaną aktualizację hosta',hLast:'ostatnio',
-    hostNote:'Komenda jest po stronie hosta (host.conf → host_update_cmd) i wymaga host_update=on.'}
+    hostNote:'Komenda jest po stronie hosta (host.conf → host_update_cmd) i wymaga host_update=on.',
+    proposeBtn:'📅 Zaplanuj harmonogram',bulkSnap:'📷 Migawka wszystkim',bulkUpd:'🔄 Aktualizuj wszystkie',bulkPurge:'🗑 Usuń migawki wszystkim',
+    snapNow:'Migawka teraz',updNow:'Aktualizuj teraz',purgeNow:'Usuń migawki',queued:'w kolejce',
+    confirmSnapAll:'Zrobić migawkę teraz na każdym kontenerze?',confirmUpdAll:'Uruchomić aktualizacje teraz na każdym kontenerze? (kontenery bez nic do zrobienia są pomijane)',
+    confirmPurgeAll:'Usunąć WSZYSTKIE zarządzane migawki (preupd_/auto_) na każdym kontenerze? Ręczne pozostają.',
+    confirmSnap:'Zrobić migawkę teraz na CT',confirmUpd:'Uruchomić aktualizację teraz na CT',
+    confirmPurge:'Usunąć WSZYSTKIE zarządzane migawki (preupd_/auto_) na CT',keepManual:'? Ręczne migawki pozostają.',
+    queuedN:'Zakolejkowano zadań:',nothingQueued:'Nic do zakolejkowania.',
+    collideMsg:'wpada w okno backupu',forceQ:'Zapisać mimo to?',
+    maintTitle:'Okno serwisowe i harmonogram',maintNote:'Rozmieszcza włączone kontenery w odstępach wewnątrz okna, omijając każde wykryte okno backupu i slot aktualizacji hosta.',
+    winStart:'Początek okna (HH:MM)',winEnd:'Koniec okna (HH:MM)',maintDay:'Dzień (0=Pn…6=Nd)',spacing:'Odstęp (min)',concurrency:'Maks. równoległych aktualizacji',
+    propose:'Zaproponuj',applyPlan:'Zastosuj harmonogram',planPreview:'Proponowany harmonogram',forbiddenZones:'Okna zablokowane (backupy/host)',
+    unplaceableLbl:'Brak miejsca (okno za małe)',noFresh:'Brak kontenerów ze świeżą kopią do zaplanowania.',placedWord:'rozmieszczono',appliedN:'Harmonogram zastosowany do'}
 };
 let LANG=localStorage.getItem('au_lang')||'en';
 const t=k=>(I18N[LANG]&&I18N[LANG][k])||(I18N.en[k])||k;
@@ -261,9 +320,12 @@ el('hostbar').onclick=openHost;
 
 // ---- guests ----
 async function load(){
-  const d=await (await fetch('/api/guests')).json();
+  const [d,q]=await Promise.all([
+    (await fetch('/api/guests')).json(),
+    (await fetch('/api/queue')).json().catch(()=>({queue:[]}))]);
   SET=d.settings;
   HU=d.host_update||{};
+  const QMAP={}; for(const j of (q.queue||[])) QMAP[j.ctid]=true;
   renderHostbar(d.host);
   el('pauseBtn').textContent=SET.paused?t('resume'):t('pause');
   el('pausetag').innerHTML=SET.paused?`<span class="tag pause">${t('pauseTag')}</span>`:'';
@@ -274,20 +336,76 @@ async function load(){
     const scope=[c.security_patch?'patch':null,c.app_update?('app:'+c.app_update):null].filter(Boolean).join(' + ')||'—';
     const snapOn=c.snapshot&&c.snapshot.enabled;
     const ret=`${c.keep>0?('keep '+c.keep):'∞'}${c.max_age_days>0?(' · '+c.max_age_days+'d'):''}${snapOn?` · 📷 ${c.snapshot.prefix}${c.snapshot.dryrun?' (dry)':''}`:''}`;
+    const queued=(!g.running&&QMAP[g.vmid])?` <span class="qtag">⏳ ${t('queued')}</span>`:'';
     const last=g.running
       ? `<span class="spin"></span> <span class="muted">${g.running.kind}…</span>`
-      : (r?`<span class="${r.status==='ok'?'ok':'bad'}">${r.status}</span> <span class="muted">${(r.ts||'').slice(0,16).replace('T',' ')}</span>`:'<span class="muted">—</span>');
+      : (r?`<span class="${r.status==='ok'?'ok':'bad'}">${r.status}</span> <span class="muted">${(r.ts||'').slice(0,16).replace('T',' ')}</span>${queued}`:'<span class="muted">—</span>'+queued);
     const tr=document.createElement('tr');
     if(g.running) tr.className='running';
     tr.innerHTML=`<td>${g.vmid}</td><td>${g.name||''}</td>
       <td><span class="tag">${g.status}</span></td>
       <td>${c.enabled?sched:'<span class="muted">'+t('disabled')+'</span>'}</td>
       <td>${scope}</td><td>${ret}</td><td>${last}</td>
-      <td><button>${t('edit')}</button></td>`;
-    tr.querySelector('button').onclick=()=>edit(g);
+      <td class="acts">
+        <button data-act="snapshot" title="${t('snapNow')}">📷</button>
+        <button data-act="update" title="${t('updNow')}">🔄</button>
+        <button data-act="purge" title="${t('purgeNow')}">🗑</button>
+        <button data-act="edit">${t('edit')}</button></td>`;
+    tr.querySelectorAll('[data-act]').forEach(b=>b.onclick=()=>rowAction(b.dataset.act,g));
     rows.appendChild(tr);
   }
 }
+
+// ---- ad-hoc actions (single + bulk) ----
+async function postAction(action,vmids){
+  const res=await fetch('/api/actions',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({action,vmids})});
+  const d=await res.json().catch(()=>({}));
+  if(d.queued!=null) alert(`${t('queuedN')} ${d.queued}`);
+  else alert(t('nothingQueued'));
+  load();
+}
+function rowAction(act,g){
+  if(act==='edit') return edit(g);
+  if(act==='snapshot'){ if(!confirm(`${t('confirmSnap')} ${g.vmid}?`)) return; }
+  if(act==='update'){ if(!confirm(`${t('confirmUpd')} ${g.vmid}?`)) return; }
+  if(act==='purge'){ if(!confirm(`${t('confirmPurge')} ${g.vmid}${t('keepManual')}`)) return; }
+  postAction(act,[g.vmid]);
+}
+function allVmids(){return [...el('rows').querySelectorAll('tr')].map(tr=>+tr.firstElementChild.textContent).filter(Boolean);}
+el('bulkSnap').onclick=()=>{const v=allVmids();if(v.length&&confirm(t('confirmSnapAll')))postAction('snapshot',v);};
+el('bulkUpd').onclick=()=>{const v=allVmids();if(v.length&&confirm(t('confirmUpdAll')))postAction('update',v);};
+el('bulkPurge').onclick=()=>{const v=allVmids();if(v.length&&confirm(t('confirmPurgeAll')))postAction('purge',v);};
+
+// ---- schedule planner ----
+let PLAN=null;
+el('proposeBtn').onclick=()=>{el('mApply').disabled=true;el('mPreview').innerHTML='';PLAN=null;el('sdlg').showModal();};
+el('mPropose').onclick=async()=>{
+  await fetch('/api/maintenance',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({window_start:el('mStart').value.trim(),window_end:el('mEnd').value.trim(),
+      weekdays:[Math.max(0,Math.min(6,+el('mDay').value||6))],
+      spacing_min:Math.max(1,+el('mSpace').value||20),concurrency:Math.max(1,+el('mConc').value||1)})});
+  const p=await (await fetch('/api/schedule/propose')).json();
+  PLAN=p; renderPlan(p);
+};
+function renderPlan(p){
+  const box=el('mPreview');
+  if(!p.plan.length){box.innerHTML=`<p class="muted">${t('noFresh')}</p>`;el('mApply').disabled=true;return;}
+  const zones=(p.forbidden||[]).map(z=>`${z.start}–${z.end}`).join(', ')||'—';
+  const rows=p.plan.map(it=>`<tr><td>${it.vmid}</td><td>${it.name||''}</td><td><b>${it.time}</b></td></tr>`).join('');
+  const un=(p.unplaceable||[]).length?`<p class="zone bad">${t('unplaceableLbl')}: ${p.unplaceable.join(', ')}</p>`:'';
+  box.innerHTML=`<b>${t('planPreview')}</b> <span class="muted">(${p.capacity.placed} ${t('placedWord')})</span>
+    <div class="scroll" style="max-height:34vh;margin-top:.4rem"><table><tbody>${rows}</tbody></table></div>
+    <p class="zone">${t('forbiddenZones')}: ${zones}</p>${un}`;
+  el('mApply').disabled=false;
+}
+el('mApply').onclick=async()=>{
+  if(!PLAN||!PLAN.plan.length) return;
+  const d=await (await fetch('/api/schedule/apply',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({plan:PLAN.plan,weekday:PLAN.weekday})})).json();
+  alert(`${t('appliedN')} ${(d.applied||[]).length}`);
+  el('sdlg').close(); load();
+};
 function edit(g){
   const c=g.config;
   el('dTitle').textContent=`CT ${g.vmid} — ${g.name||''}`;
@@ -323,7 +441,14 @@ async function save(vmid){
       prefix:el('sPrefix').value.trim()||'auto',
       keep:Math.max(0,+el('sKeep').value||0),max_age_days:Math.max(0,+el('sAge').value||0),
       dryrun:el('sDry').checked}};
-  await fetch('/api/guests/'+vmid,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  let res=await fetch('/api/guests/'+vmid,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(res.status===409){
+    const d=await res.json();
+    const w=d.window||{};
+    if(!confirm(`${d.time} ${t('collideMsg')} (${w.start}–${w.end}). ${t('forceQ')}`)) return;
+    body.force=true;
+    res=await fetch('/api/guests/'+vmid,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  }
   el('dlg').close(); load();
 }
 el('pauseBtn').onclick=async()=>{await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({paused:!SET.paused})});load()};
