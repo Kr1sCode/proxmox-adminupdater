@@ -1086,7 +1086,7 @@ function renderWiz(){
     b.innerHTML=`<p style="color:var(--ink-dim)">${t('wizSchedLead')}</p>
       <div class="prop" style="background:linear-gradient(90deg,var(--warn-bg),transparent 70%)">
         <label style="margin-top:0">${ic('shield','warn')} ${t('wizHostTitle')}</label>
-        <div class="row" style="margin-top:.2rem"><input type="checkbox" id="wHostEn"><label style="margin:0">${t('wizHostEnable')}</label></div>
+        <div class="row" style="margin-top:.2rem;justify-content:flex-start"><input type="checkbox" id="wHostEn"><label style="margin:0">${t('wizHostEnable')}</label></div>
         <div class="grid2"><div><label class="thin">${t('timeLbl')}</label><input type="text" id="wHostTime"></div>
         <div><label class="thin">${t('maintDay')}</label><input type="number" id="wHostDay" min="0" max="6"></div></div>
         <p class="note" style="margin-bottom:0">${t('wizHostNote')}</p>
