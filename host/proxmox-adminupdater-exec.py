@@ -44,6 +44,7 @@ def load_cfg():
         "insecure": g.getboolean("tls_insecure", False),
         "notify_email": g.get("notify_email", "").strip(),
         "notify_on": g.get("notify_on", "errors").strip().lower(),   # always | errors | never
+        "notify_via": g.get("notify_via", "pve").strip().lower(),    # pve | sendmail
         "notify_from": g.get("notify_from", "adminupdater@" + os.uname().nodename).strip(),
         # PVE host self-update (defence in depth: must be enabled host-side too)
         "host_update": g.getboolean("host_update", False),
@@ -338,13 +339,65 @@ def build_email_html(results, host):
         "proxmox-adminupdater</div></div></body></html>")
 
 
-def send_email(cfg, subject, html):
-    msg = MIMEText(html, "html", "utf-8")
-    msg["Subject"] = subject
-    msg["From"] = cfg["notify_from"]
-    msg["To"] = cfg["notify_email"]
+def _parse_notifications(path):
+    """Parse a PVE notifications.cfg-style file -> {smtp_target_name: {key: val}}."""
+    out, cur = {}, None
+    try:
+        lines = open(path).read().splitlines()
+    except OSError:
+        return out
+    for ln in lines:
+        if not ln.strip():
+            cur = None
+            continue
+        if not ln[0].isspace():
+            m = re.match(r"^(\w+):\s*(\S+)", ln)
+            cur = m.group(2) if (m and m.group(1) == "smtp") else None
+            if cur:
+                out[cur] = {}
+        elif cur:
+            kv = ln.strip().split(None, 1)
+            if len(kv) == 2:
+                out[cur][kv[0]] = kv[1]
+    return out
+
+
+def pve_smtp_target():
+    """Reuse Proxmox's configured SMTP notification target (server, creds,
+    recipient) so e-mail is never configured twice. Public part in
+    /etc/pve/notifications.cfg, the password in /etc/pve/priv/notifications.cfg."""
+    pub = _parse_notifications("/etc/pve/notifications.cfg")
+    if not pub:
+        return None
+    name = next(iter(pub))            # first smtp target (e.g. gmail-smtp)
+    t = pub[name]
+    pw = (_parse_notifications("/etc/pve/priv/notifications.cfg").get(name) or {}).get("password")
+    if not (t.get("server") and t.get("mailto")):
+        return None
+    return {"server": t["server"], "port": int(t.get("port", 587)),
+            "mode": (t.get("mode") or "starttls").lower(),
+            "username": t.get("username"), "password": pw,
+            "from": t.get("from-address") or t.get("username") or "adminupdater@localhost",
+            "mailto": re.split(r"[,\s]+", t["mailto"].strip())}
+
+
+def send_via_smtp(t, msg):
+    if t["mode"] == "tls" or t["port"] == 465:
+        srv = smtplib.SMTP_SSL(t["server"], t["port"], timeout=30)
+    else:
+        srv = smtplib.SMTP(t["server"], t["port"], timeout=30)
+        srv.ehlo()
+        if t["mode"] == "starttls":
+            srv.starttls()
+            srv.ehlo()
+    if t.get("username") and t.get("password"):
+        srv.login(t["username"], t["password"])
+    srv.send_message(msg)
+    srv.quit()
+
+
+def _send_sendmail(msg):
     raw = msg.as_bytes()
-    # 1) Proxmox host mail transport (postfix) via sendmail — the host's config
     for sm in ("/usr/sbin/sendmail", "/usr/lib/sendmail"):
         if os.path.exists(sm):
             try:
@@ -352,26 +405,48 @@ def send_email(cfg, subject, html):
                     return True
             except Exception:  # noqa: BLE001
                 pass
-    # 2) fallback: local SMTP
     try:
         with smtplib.SMTP("localhost", 25, timeout=15) as s:
             s.send_message(msg)
         return True
     except Exception as e:  # noqa: BLE001
-        print(f"e-mail nieudany: {e}")
+        print(f"sendmail/SMTP lokalny nieudany: {e}")
         return False
 
 
+def deliver(cfg, subject, html):
+    via = cfg.get("notify_via", "pve")
+    if via == "pve":
+        t = pve_smtp_target()
+        if t:
+            msg = MIMEText(html, "html", "utf-8")
+            msg["Subject"], msg["From"], msg["To"] = subject, t["from"], ", ".join(t["mailto"])
+            try:
+                send_via_smtp(t, msg)
+                print(f"raport wysłany przez PVE SMTP ({t['server']}) -> {', '.join(t['mailto'])}")
+                return True
+            except Exception as e:  # noqa: BLE001
+                print(f"PVE SMTP nieudany: {e}; próbuję sendmail")
+        else:
+            print("brak skonfigurowanego targetu SMTP w PVE; próbuję sendmail")
+    to = cfg.get("notify_email")
+    if not to:
+        print("brak notify_email do fallbacku — pomijam wysyłkę")
+        return False
+    msg = MIMEText(html, "html", "utf-8")
+    msg["Subject"], msg["From"], msg["To"] = subject, cfg["notify_from"], to
+    return _send_sendmail(msg)
+
+
 def maybe_notify(cfg, results):
-    if not cfg["notify_email"] or cfg["notify_on"] == "never" or not results:
+    if cfg["notify_on"] == "never" or not results:
         return
     bad = [r for r in results if r["status"] not in GOOD]
     if cfg["notify_on"] == "errors" and not bad:
         return
     host = os.uname().nodename
     subject = f"[adminupdater] {host}: {'problemy' if bad else 'OK'} ({len(results)} zadań)"
-    if send_email(cfg, subject, build_email_html(results, host)):
-        print(f"raport e-mail wysłany do {cfg['notify_email']}")
+    deliver(cfg, subject, build_email_html(results, host))
 
 
 def ping_progress(cfg, job):
@@ -410,23 +485,162 @@ def post_host_status(cfg):
         pass
 
 
+# ---- fleet inventory: backup jobs + windows + per-guest coverage --------------
+INVENTORY_TS = "/var/lib/proxmox-adminupdater/inventory.ts"
+INVENTORY_TTL = 3600   # re-scan at most hourly (pvesm over network is slow)
+
+
+def _sh(cmd, t=25):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=t).stdout
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def detect_backup_jobs():
+    jobs, cur = [], None
+    try:
+        lines = open("/etc/pve/jobs.cfg").read().splitlines()
+    except OSError:
+        lines = []
+    for ln in lines:
+        if not ln.strip():
+            cur = None
+            continue
+        if not ln[0].isspace():
+            m = re.match(r"^(\w+):\s*(\S+)", ln)
+            cur = {"id": m.group(2), "vmids": []} if (m and m.group(1) == "vzdump") else None
+            if cur:
+                jobs.append(cur)
+        elif cur:
+            k, _, v = ln.strip().partition(" ")
+            v = v.strip()
+            cur["vmids"] = [x for x in re.split(r"[,\s]+", v) if x] if k == "vmid" else cur.get("vmids", [])
+            if k != "vmid":
+                cur[k] = v
+    return jobs
+
+
+def _hhmm_min(s):
+    m = re.search(r"\b(\d{1,2}):(\d{2})\b", s or "")
+    return int(m.group(1)) * 60 + int(m.group(2)) if m else None
+
+
+def _ts_min(ts):
+    m = re.search(r"\b(\d\d):(\d\d):\d\d\b", ts or "")
+    return int(m.group(1)) * 60 + int(m.group(2)) if m else None
+
+
+def backup_coverage(storages):
+    cov = {}
+    for st in storages:
+        for line in _sh(["pvesm", "list", st], 25).splitlines()[1:]:
+            c = line.split()
+            if len(c) < 2 or "backup" not in c[0]:
+                continue
+            volid, vmid = c[0], c[-1]
+            m = re.search(r"(\d{4})[-_](\d\d)[-_](\d\d)[T_](\d\d)[:_](\d\d)[:_](\d\d)", volid)
+            if not m:
+                continue
+            ts = "{}-{}-{} {}:{}:{}".format(*m.groups())
+            if vmid not in cov or ts > cov[vmid]["ts"]:
+                cov[vmid] = {"storage": st, "ts": ts}
+    return cov
+
+
+def build_inventory():
+    """Read-only fleet scan. Windows are LEARNED: start from the job schedule,
+    end from the latest actual backup completion among the job's guests (+15 min)."""
+    jobs = detect_backup_jobs()
+    storages = sorted({j.get("storage") for j in jobs if j.get("storage")})
+    cov = backup_coverage(storages)
+    windows = []
+    for j in jobs:
+        smin = _hhmm_min(j.get("schedule"))
+        if smin is None:            # monthly / non-daily -> no daily window
+            continue
+        # latest completion = max of FULL timestamps (lexicographic = chronological,
+        # so a backup that crosses midnight is handled correctly), then +15 min margin.
+        tss = [cov[v]["ts"] for v in j.get("vmids", []) if v in cov]
+        end = (_ts_min(max(tss)) + 15) % 1440 if tss and _ts_min(max(tss)) is not None else (smin + 180) % 1440
+        windows.append({"job": j["id"], "start_min": smin, "end_min": end, "storage": j.get("storage")})
+    guests = {}
+    for line in _sh(["pct", "list"], 15).splitlines()[1:]:
+        c = line.split()
+        if not c:
+            continue
+        vmid, name = c[0], (c[-1] if len(c) > 2 else "")
+        snaps = sum(1 for l in _sh(["pct", "listsnapshot", vmid], 15).splitlines()
+                    if re.search(r"_\d{8}_\d{6}", l))
+        b = cov.get(vmid)
+        guests[vmid] = {"name": name, "snapshots": snaps,
+                        "backup": {"storage": b["storage"], "ts": b["ts"]} if b else None}
+    return {"checked": datetime.now(timezone.utc).isoformat(),
+            "jobs": [{"id": j["id"], "schedule": j.get("schedule"),
+                      "storage": j.get("storage"), "vmids": j.get("vmids", [])} for j in jobs],
+            "windows": windows, "guests": guests}
+
+
+def maybe_refresh_inventory(cfg):
+    """Throttled, best-effort. Never blocks jobs — called after report."""
+    try:
+        if time.time() - os.path.getmtime(INVENTORY_TS) < INVENTORY_TTL:
+            return
+    except OSError:
+        pass
+    inv = build_inventory()
+    try:
+        http(cfg, "/inventory", "POST", inv)
+    except Exception as e:  # noqa: BLE001
+        print(f"inventory post nieudany: {e}")
+        return
+    os.makedirs(os.path.dirname(INVENTORY_TS), exist_ok=True)
+    open(INVENTORY_TS, "w").write(str(int(time.time())))
+    print(f"inventory odświeżone: {len(inv['guests'])} guestów, {len(inv['windows'])} okien backupu")
+
+
 def main():
     cfg = load_cfg()
     post_host_status(cfg)   # always refresh the banner, even with no jobs
-    jobs = http(cfg, "/plan").get("jobs", [])
-    if not jobs:
-        print("nic do zrobienia")
-        return
     results = []
-    for j in jobs:
+    for j in http(cfg, "/plan").get("jobs", []):
         ping_progress(cfg, j)
         results.append(do_job(cfg, j))
-    http(cfg, "/report", "POST", {"results": results})
-    maybe_notify(cfg, results)
+    if results:
+        http(cfg, "/report", "POST", {"results": results})
+        maybe_notify(cfg, results)
+    maybe_refresh_inventory(cfg)   # throttled hourly; runs even when nothing was due
     bad = [r for r in results if r["status"] not in GOOD]
     print(f"wykonano {len(results)} zadań, {len(bad)} problemów")
     sys.exit(1 if bad else 0)
 
 
+def test_notify():
+    """Send a sample HTML report through the configured channel (for setup checks)."""
+    cfg = load_cfg()
+    cfg["notify_on"] = "always"
+    sample = [
+        {"ctid": 108, "kind": "update", "status": "ok",
+         "snapshot": "preupd_20260720_020000", "pruned": ["preupd_20260713_020000"],
+         "steps": [{"action": "security-patch", "status": "ok", "rc": 0},
+                   {"action": "app-update", "status": "ok", "rc": 0},
+                   {"action": "health-check", "status": "ok", "rc": 0}]},
+        {"kind": "host-update", "status": "failed", "reboot": True,
+         "steps": [{"action": "host-update", "status": "failed", "rc": 100}]},
+    ]
+    maybe_notify(cfg, sample)
+
+
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 1 and sys.argv[1] == "test-notify":
+        test_notify()
+    elif len(sys.argv) > 1 and sys.argv[1] == "inventory":
+        inv = build_inventory()
+        print(json.dumps(inv, indent=2, ensure_ascii=False))
+        try:
+            http(load_cfg(), "/inventory", "POST", inv)
+            print("-> wysłane do mózgu (/inventory)")
+        except Exception as e:  # noqa: BLE001
+            print(f"-> post nieudany: {e}")
+    else:
+        main()

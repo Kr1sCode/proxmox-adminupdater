@@ -283,8 +283,9 @@ allowed_ctids  = ${ACL_VALUE}
 recipes_dir    = /etc/proxmox-adminupdater/recipes
 exec_timeout   = 1800
 tls_insecure   = false
-# Raport e-mail przez pocztę hosta (Proxmox postfix). notify_on: always|errors|never
-notify_email   =
+# Raport e-mail. notify_via: pve = użyj skonfigurowanego targetu SMTP z PVE
+# (czyta /etc/pve/notifications.cfg + hasło z /etc/pve/priv/). notify_on: always|errors|never
+notify_via     = pve
 notify_on      = errors
 # Aktualizacja samego hosta PVE (druga bramka: domyślnie off). Komenda po stronie hosta.
 host_update      = off

@@ -77,6 +77,15 @@ def compute_plan():
         return []
     state = core.load_state()
     now = int(time.time())
+    inv = state.get(INVENTORY_KEY, {})
+
+    # GUARD 1: never collide with a running backup window (the IO-storm lesson).
+    if sett.get("avoid_backup_window", True):
+        win = active_backup_window(now, inv)
+        if win:
+            core.log(f"tick: okno backupu aktywne ({win.get('job')}) — odkładam wszystkie zadania")
+            return []
+
     jobs = []
     for vmid in cfg.get("guests", {}):
         g = guest_settings(cfg, vmid)
@@ -85,7 +94,13 @@ def compute_plan():
         # --- UPDATE job: ONE pre-snapshot covers all actions, run in order
         # (security patches, then app recipe, then health-check) under one
         # rollback point. Its own clock: last_run.
-        if g["enabled"] and core.is_due(g, st.get("last_run", 0), now):
+        due = g["enabled"] and core.is_due(g, st.get("last_run", 0), now)
+        # GUARD 2: don't auto-update a guest without a fresh backup.
+        no_backup = (due and sett.get("require_backup", True)
+                     and not guest_backup_fresh(vmid, inv, int(sett.get("backup_fresh_hours", 24)), now))
+        if no_backup:
+            core.log(f"guest {vmid}: brak świeżej kopii — auto-update wstrzymany (require_backup)")
+        if due and not no_backup:
             actions = []
             if g["security_patch"]:
                 actions.append("security-patch")
@@ -170,6 +185,46 @@ def record_report(results):
 
 RUNNING_STALE = 2 * 3600   # a "running" marker older than this is treated as dead
 HOST_KEY = "_host"         # state slot for the PVE host's own update status + schedule
+INVENTORY_KEY = "_inventory"   # fleet scan posted by the host executor
+
+
+def set_inventory(data):
+    state = core.load_state()
+    state[INVENTORY_KEY] = dict(data or {})
+    core.save_state(state)
+    return {"ok": True}
+
+
+def get_inventory():
+    return core.load_state().get(INVENTORY_KEY, {})
+
+
+def _now_minute(now_ts):
+    lt = time.localtime(now_ts)
+    return lt.tm_hour * 60 + lt.tm_min
+
+
+def active_backup_window(now_ts, inv):
+    """Return the backup window covering 'now' (handles wrap past midnight), else None."""
+    m = _now_minute(now_ts)
+    for w in inv.get("windows", []):
+        s, e = int(w.get("start_min", 0)), int(w.get("end_min", 0))
+        inside = (s <= m < e) if s <= e else (m >= s or m < e)
+        if inside:
+            return w
+    return None
+
+
+def guest_backup_fresh(vmid, inv, fresh_hours, now_ts):
+    g = (inv.get("guests") or {}).get(str(vmid))
+    if not g or not g.get("backup"):
+        return False
+    try:
+        t = dt.datetime.strptime(g["backup"]["ts"], "%Y-%m-%d %H:%M:%S")
+        age = now_ts - t.replace(tzinfo=dt.timezone.utc).timestamp()
+        return 0 <= age < fresh_hours * 3600
+    except (ValueError, KeyError):
+        return False
 
 # Schedule for updating the PVE host itself. The ACTUAL command lives host-side
 # in host.conf (host_update_cmd) — the panel only decides timing + enable, never
@@ -224,17 +279,28 @@ def guest_view():
     idx = core.guest_index(pve, lxc_only=True)
     state = core.load_state()
     now = int(time.time())
+    sett = cfg["settings"]
+    inv = state.get(INVENTORY_KEY, {})
+    fresh_h = int(sett.get("backup_fresh_hours", 24))
     out = []
     for vmid, meta in sorted(idx.items(), key=lambda kv: int(kv[0])):
         st = state.get(vmid, {})
         run = st.get("running")
         running = run if (run and now - int(run.get("since", 0)) < RUNNING_STALE) else None
+        inv_g = (inv.get("guests") or {}).get(vmid, {})
+        fresh = guest_backup_fresh(vmid, inv, fresh_h, now)
+        g = guest_settings(cfg, vmid)
+        blocked = bool(g["enabled"] and sett.get("require_backup", True) and not fresh)
         out.append({"vmid": int(vmid), "name": meta["name"], "status": meta["status"],
-                    "config": guest_settings(cfg, vmid),
+                    "config": g,
                     "report": st.get("last"), "report_snap": st.get("last_snap"),
-                    "running": running})
-    return {"settings": cfg["settings"], "guests": out,
-            "host": state.get(HOST_KEY), "host_update": host_update_settings(cfg)}
+                    "running": running,
+                    "backup": {"info": inv_g.get("backup"), "fresh": fresh},
+                    "snapshots": inv_g.get("snapshots"),
+                    "blocked_no_backup": blocked})
+    return {"settings": sett, "guests": out,
+            "host": state.get(HOST_KEY), "host_update": host_update_settings(cfg),
+            "inventory": inv}
 
 
 if __name__ == "__main__":

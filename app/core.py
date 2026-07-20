@@ -35,6 +35,9 @@ DEFAULT_SETTINGS = {
     "rollback_on_fail": False,   # host rolls back the pre-snapshot if a job fails
     "default_keep": 3,           # retention: keep newest N preupd_ snapshots (0 = no count limit)
     "default_max_age_days": 0,   # retention: delete preupd_ older than N days (0 = off)
+    "require_backup": True,      # skip auto-update of a guest without a fresh backup
+    "backup_fresh_hours": 24,    # a backup counts as "fresh" if newer than this
+    "avoid_backup_window": True, # never run jobs while a detected backup window is active
 }
 DEFAULT_AUTH = {
     "allowlist": ["root@pam"],   # who may log in to the panel

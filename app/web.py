@@ -87,7 +87,7 @@ def _guard():
         return (jsonify({"error": "setup required"}), 503) if p.startswith("/api/") \
             else redirect("/setup")
     # host executor endpoints: bearer auth enforced in the handlers
-    if p in ("/plan", "/report", "/progress", "/host-status"):
+    if p in ("/plan", "/report", "/progress", "/host-status", "/inventory"):
         return None
     if p == "/login" or p.startswith("/api/login"):
         return None
@@ -265,6 +265,14 @@ def api_host_status():
         return jsonify({"error": "unauthorized"}), 401
     body = request.get_json(force=True, silent=True) or {}
     return jsonify(up.set_host_status(body))
+
+
+@app.route("/inventory", methods=["POST"])
+def api_inventory():
+    if not _bearer_ok(request):
+        return jsonify({"error": "unauthorized"}), 401
+    body = request.get_json(force=True, silent=True) or {}
+    return jsonify(up.set_inventory(body))
 
 
 @app.route("/api/health")

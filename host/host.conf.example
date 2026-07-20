@@ -22,11 +22,15 @@ recipes_dir    = /etc/proxmox-adminupdater/recipes
 exec_timeout   = 1800
 tls_insecure   = false
 
-# E-mail report (HTML) after each run, sent via the HOST mail transport
-# (Proxmox's postfix/sendmail — configure notifications on the host as usual).
-# notify_on: always | errors | never
-notify_email   =
+# E-mail report (HTML) after each run.
+# notify_via: pve      -> reuse Proxmox's configured SMTP notification target
+#                        (reads /etc/pve/notifications.cfg + the password in
+#                        /etc/pve/priv/notifications.cfg). No creds duplicated.
+#             sendmail -> host postfix/sendmail (needs notify_email set below).
+# notify_on:  always | errors | never
+notify_via     = pve
 notify_on      = errors
+# notify_email = you@example.com    (only for notify_via = sendmail)
 # notify_from  = adminupdater@pve   (default: adminupdater@<hostname>)
 
 # Update the PVE HOST itself when the panel schedules it (second gate: OFF by
