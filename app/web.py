@@ -292,6 +292,22 @@ def api_host_update():
     return jsonify({"ok": True, "host_update": hu})
 
 
+@app.route("/api/notify", methods=["POST"])
+def api_notify():
+    body = request.get_json(force=True) or {}
+    n = up.save_notify(body)
+    _audit(f"powiadomienia: when={n['when']} grouping={n['grouping']} format={n['format']} "
+           f"email={n['email'] or '<PVE target>'}")
+    return jsonify({"ok": True, "notify": n})
+
+
+@app.route("/api/notify/test", methods=["POST"])
+def api_notify_test():
+    up.request_notify_test()
+    _audit("powiadomienia: zlecono e-mail testowy")
+    return jsonify({"ok": True})
+
+
 @app.route("/api/log")
 def api_log():
     try:
@@ -317,7 +333,9 @@ def api_plan():
     # scheduled jobs (idempotent via last_run) + one-shot ad-hoc jobs from the queue
     jobs = up.compute_plan() + up.take_queue()
     return jsonify({"generated_at": dt.datetime.utcnow().isoformat() + "Z",
-                    "jobs": jobs})
+                    "jobs": jobs,
+                    "notify": up.notify_settings(core.load_config()),
+                    "notify_test": up.take_notify_test()})
 
 
 @app.route("/report", methods=["POST"])

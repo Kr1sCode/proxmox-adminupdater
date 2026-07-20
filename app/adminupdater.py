@@ -499,6 +499,51 @@ def host_update_settings(cfg):
     return h
 
 
+# ---- notifications (panel-controlled; delivery uses the host's Proxmox mail) ----
+# The panel decides WHEN / grouping / format / recipient; the actual transport
+# (SMTP server + credentials) stays host-side in Proxmox's notifications.cfg. The
+# executor reads this over /plan and applies it.
+NOTIFY_DEFAULTS = {
+    "when": "errors",       # always | errors | never
+    "grouping": "digest",   # digest = one e-mail per service window | per-run = one per guest
+    "format": "html",       # html | text
+    "email": "",            # optional recipient override; empty = Proxmox target's own recipient
+}
+NOTIFY_TEST_KEY = "_notify_test"
+
+
+def notify_settings(cfg):
+    n = dict(NOTIFY_DEFAULTS)
+    n.update(cfg.get("notify") or {})
+    return n
+
+
+def save_notify(patch):
+    cfg = core.load_config()
+    n = notify_settings(cfg)
+    for k in NOTIFY_DEFAULTS:
+        if k in patch:
+            n[k] = patch[k]
+    cfg["notify"] = n
+    core.save_config(cfg)
+    return n
+
+
+def request_notify_test():
+    st = core.load_state()
+    st[NOTIFY_TEST_KEY] = int(time.time())
+    core.save_state(st)
+
+
+def take_notify_test():
+    """True at most once per request: consumes the pending test flag."""
+    st = core.load_state()
+    if st.pop(NOTIFY_TEST_KEY, None):
+        core.save_state(st)
+        return True
+    return False
+
+
 def set_host_status(data):
     """Merge the PVE host's update status (pending count, reboot flag, version)
     posted by the host executor. Merges so it never clobbers last_run/last."""
@@ -556,7 +601,7 @@ def guest_view():
                     "blocked_no_backup": blocked})
     return {"settings": sett, "guests": out,
             "host": state.get(HOST_KEY), "host_update": host_update_settings(cfg),
-            "inventory": inv}
+            "notify": notify_settings(cfg), "inventory": inv}
 
 
 if __name__ == "__main__":

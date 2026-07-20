@@ -58,7 +58,7 @@
   nav button.active{border-bottom-color:var(--accent);color:var(--ink);font-weight:600}
 
   main{flex:1;min-height:0;overflow-y:auto;padding:6px 0 40px}
-  .wrap{max-width:1200px;margin:0 auto;padding:12px 22px}
+  .wrap{max-width:1560px;margin:0 auto;padding:12px 28px}
   .pane{display:none}.pane.active{display:block}
 
   /* host strip */
@@ -238,6 +238,7 @@
   <button class="tab active" data-tab="window" data-i18n="windowTab">Service window</button>
   <button class="tab" data-tab="guests" data-i18n="machinesTitle">LXC machines</button>
   <button class="tab" data-tab="log" data-i18n="log">Log</button>
+  <button class="tab" data-tab="notify" data-i18n="notifyTab">Notifications</button>
 </nav>
 
 <main>
@@ -299,6 +300,32 @@
       <span class="sp"></span><span class="muted" id="logMeta"></span>
     </div>
     <div class="panel"><pre id="logbox">…</pre></div>
+  </section>
+
+  <section class="pane" id="pane-notify">
+    <div class="sec"><h2 data-i18n="notifyTitle">Notifications</h2><span class="hint" data-i18n="notifyHint">— delivered through your Proxmox mail transport</span></div>
+    <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">
+      <div class="panel" style="padding:18px 20px;flex:1;min-width:340px;max-width:560px">
+        <p class="muted" style="margin:0 0 .6rem;font-size:13px" data-i18n="notifyLead">The panel decides when, how and to whom. The SMTP server and credentials stay on the Proxmox host (Datacenter → Notifications) — never entered here.</p>
+        <label data-i18n="notifyWhen">When to send</label>
+        <select id="nWhen"><option value="always" data-i18n="nAlways">After every run</option><option value="errors" data-i18n="nErrors">Only on failure / rollback</option><option value="never" data-i18n="nNever">Never</option></select>
+        <label data-i18n="notifyGrouping">Grouping</label>
+        <select id="nGroup"><option value="digest" data-i18n="gDigest">Digest — one e-mail per service window</option><option value="per-run" data-i18n="gPerRun">Per update — one e-mail per machine</option></select>
+        <label data-i18n="notifyFormat">Format</label>
+        <select id="nFormat"><option value="html" data-i18n="fHtml">HTML (rich report)</option><option value="text" data-i18n="fText">Plain text</option></select>
+        <label data-i18n="notifyEmail">Recipient (optional)</label><input type="text" id="nEmail" data-i18n-ph="notifyEmailPh" placeholder="leave empty = use the Proxmox target's recipient">
+        <p class="note" data-i18n="notifyEmailNote">Empty = send to whoever your Proxmox notification target already mails.</p>
+        <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">
+          <button class="btn primary" id="nSave" data-i18n="save">Save</button>
+          <button class="btn ghost" id="nTest"><span data-ic="refresh"></span> <span data-i18n="notifyTest">Send test</span></button>
+          <span id="nMsg" class="muted" style="align-self:center;font-size:12px"></span>
+        </div>
+      </div>
+      <div style="flex:1;min-width:340px">
+        <div class="sec" style="margin-top:0"><h2 style="font-size:14px" data-i18n="notifyPreview">Preview</h2><span class="hint" data-i18n="notifyPreviewHint">— sample of the e-mail</span></div>
+        <div class="panel" id="nPreview" style="overflow:hidden;background:#f1f5f9"></div>
+      </div>
+    </div>
   </section>
 </div>
 </main>
@@ -498,6 +525,14 @@ const I18N={
     propose:'Propose',applyPlan:'Apply schedule',planPreview:'Proposed schedule',forbiddenZones:'Blocked windows (backups/host)',
     unplaceableLbl:'No slot (window too small)',noFresh:'No containers with a fresh backup to schedule.',placedWord:'placed',appliedN:'Schedule applied to',
     footNote:'State colours (green/amber/red) carry meaning; azure accent is navigation only. Notifications: aggregate HTML report after each window + a separate alert only on rollback.',
+    notifyTab:'Notifications',notifyTitle:'Notifications',notifyHint:'— delivered through your Proxmox mail transport',
+    notifyLead:'The panel decides when, how and to whom. The SMTP server and credentials stay on the Proxmox host (Datacenter → Notifications) — never entered here.',
+    notifyWhen:'When to send',nAlways:'After every run',nErrors:'Only on failure / rollback',nNever:'Never',
+    notifyGrouping:'Grouping',gDigest:'Digest — one e-mail per service window',gPerRun:'Per update — one e-mail per machine',
+    notifyFormat:'Format',fHtml:'HTML (rich report)',fText:'Plain text',
+    notifyEmail:'Recipient (optional)',notifyEmailPh:'empty = use the Proxmox target’s recipient',notifyEmailNote:'Empty = send to whoever your Proxmox notification target already mails.',
+    notifyTest:'Send test',notifyPreview:'Preview',notifyPreviewHint:'— sample of the e-mail',
+    notifySaved:'Saved.',notifyTestQueued:'Test queued — the host sends it on its next tick (≤ 5 min).',
     // wizard
     wizEyebrow:'Wizard · first run',wizTitle:"Let's schedule safe updates for your fleet",wizClose:'Close (finish later)',wizBack:'Back',wizFinish:'Finish',
     st1:'1 · Scan',st2:'2 · Backup coverage',st3:'3 · Schedule',st4:'4 · Scope + health',st5:'5 · Notifications',
@@ -559,6 +594,14 @@ const I18N={
     propose:'Zaproponuj',applyPlan:'Zastosuj harmonogram',planPreview:'Proponowany harmonogram',forbiddenZones:'Okna zablokowane (backupy/host)',
     unplaceableLbl:'Brak miejsca (okno za małe)',noFresh:'Brak kontenerów ze świeżą kopią do zaplanowania.',placedWord:'rozmieszczono',appliedN:'Harmonogram zastosowany do',
     footNote:'Kolory stanu (zielony/bursztyn/czerwony) niosą znaczenie; akcent (azur) to tylko nawigacja. Powiadomienia: zbiorczy raport HTML po każdym oknie + osobny alert tylko przy rollbacku.',
+    notifyTab:'Powiadomienia',notifyTitle:'Powiadomienia',notifyHint:'— wysyłane przez pocztę Twojego Proxmoksa',
+    notifyLead:'Panel decyduje kiedy, jak i do kogo. Serwer SMTP i poświadczenia zostają na hoście Proxmox (Datacenter → Notifications) — tu ich nie podajesz.',
+    notifyWhen:'Kiedy wysyłać',nAlways:'Po każdym uruchomieniu',nErrors:'Tylko przy błędzie / rollbacku',nNever:'Nigdy',
+    notifyGrouping:'Grupowanie',gDigest:'Zbiorczo — jeden e-mail na okno serwisowe',gPerRun:'Per aktualizacja — jeden e-mail na maszynę',
+    notifyFormat:'Format',fHtml:'HTML (ładny raport)',fText:'Zwykły tekst',
+    notifyEmail:'Odbiorca (opcjonalnie)',notifyEmailPh:'puste = odbiorca z targetu Proxmoksa',notifyEmailNote:'Puste = wyślij do tego, kogo już adresuje Twój target powiadomień w Proxmox.',
+    notifyTest:'Wyślij test',notifyPreview:'Podgląd',notifyPreviewHint:'— przykład e-maila',
+    notifySaved:'Zapisano.',notifyTestQueued:'Test zakolejkowany — host wyśle go przy następnym tiku (≤ 5 min).',
     wizEyebrow:'Kreator · pierwsze uruchomienie',wizTitle:'Ułóżmy bezpieczne aktualizacje Twojej floty',wizClose:'Zamknij (dokończę później)',wizBack:'Wstecz',wizFinish:'Zakończ',
     st1:'1 · Skan',st2:'2 · Pokrycie backupem',st3:'3 · Harmonogram',st4:'4 · Zakres + health',st5:'5 · Powiadomienia',
     wizScanLead:'Przeskanowałem hosta {n}. Oto co znalazłem:',scLxc:'kontenerów LXC',scFresh:'ma świeży backup (< {h} h)',scSnaps:'migawek łącznie',scNoBk:'bez żadnej kopii — ryzyko',
@@ -586,6 +629,7 @@ function applyLang(l){
   document.querySelectorAll('[data-i18n]').forEach(n=>n.textContent=t(n.dataset.i18n));
   document.querySelectorAll('[data-i18n-ph]').forEach(n=>n.placeholder=t(n.dataset.i18nPh));
   render();if(el('wiz').open)renderWiz();
+  if(el('nPreview'))renderNotifyPreview();
 }
 el('langBtn').onclick=()=>applyLang(LANG==='en'?'pl':'en');
 el('wizLang').onclick=()=>applyLang(LANG==='en'?'pl':'en');
@@ -604,7 +648,10 @@ function stopGuestsAuto(){if(guestsTimer){clearInterval(guestsTimer);guestsTimer
 document.querySelectorAll('nav .tab').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('nav .tab').forEach(x=>x.classList.toggle('active',x===b));
   document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('active',p.id==='pane-'+b.dataset.tab));
-  if(b.dataset.tab==='log'){stopGuestsAuto();loadLog();startLogAuto();}else{stopLogAuto();load();startGuestsAuto();}
+  const tab=b.dataset.tab;
+  if(tab==='log'){stopGuestsAuto();loadLog();startLogAuto();}
+  else if(tab==='notify'){stopLogAuto();stopGuestsAuto();load().then(fillNotify);}
+  else{stopLogAuto();load();startGuestsAuto();}
 });
 
 // ---------- helpers ----------
@@ -934,6 +981,48 @@ function startLogAuto(){stopLogAuto();if(el('logAuto').checked)logTimer=setInter
 function stopLogAuto(){if(logTimer){clearInterval(logTimer);logTimer=null;}}
 el('logRefresh').onclick=loadLog;
 el('logAuto').onchange=()=>el('logAuto').checked?startLogAuto():stopLogAuto();
+
+// ---------- notifications ----------
+function fillNotify(){
+  const n=DATA.notify||{when:'errors',grouping:'digest',format:'html',email:''};
+  el('nWhen').value=n.when||'errors';el('nGroup').value=n.grouping||'digest';
+  el('nFormat').value=n.format||'html';el('nEmail').value=n.email||'';
+  renderNotifyPreview();
+}
+el('nFormat').onchange=renderNotifyPreview;
+el('nSave').onclick=async()=>{
+  await fetch('/api/notify',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({when:el('nWhen').value,grouping:el('nGroup').value,format:el('nFormat').value,email:el('nEmail').value.trim()})});
+  el('nMsg').textContent=t('notifySaved');setTimeout(()=>el('nMsg').textContent='',3000);
+};
+el('nTest').onclick=async()=>{
+  await fetch('/api/notify/test',{method:'POST'});
+  el('nMsg').textContent=t('notifyTestQueued');setTimeout(()=>el('nMsg').textContent='',7000);
+};
+function _card(title,col,snap,steps){
+  const rows=steps.map(s=>`<tr><td style="padding:2px 10px;color:#475569">${s}</td><td style="padding:2px 10px;color:#0e9d6b;font-weight:600">ok</td><td style="padding:2px 10px;color:#94a3b8">rc=0</td></tr>`).join('');
+  return `<div style="border:1px solid #e2e8f0;border-radius:10px;margin:10px 0;overflow:hidden">
+    <div style="background:${col};color:#fff;padding:8px 12px;font-weight:700">${title}</div>
+    <div style="padding:8px 12px;font-size:13px;color:#334155"><div>snapshot: <code>${snap}</code></div>
+    <table style="border-collapse:collapse;margin-top:6px">${rows}</table></div></div>`;
+}
+function renderNotifyPreview(){
+  const box=el('nPreview'),pl=LANG==='pl';
+  if(el('nFormat').value==='text'){
+    box.style.background='var(--surface)';
+    const txt=`adminupdater — ${pl?'wszystko OK':'all OK'}\nhost pve-demo · ${pl?'zadań':'jobs'}: 2 · OK: 2 · ${pl?'problemy':'problems'}: 0\n`+
+      '-'.repeat(48)+`\nCT 114 · update · OK\n  snapshot: preupd_20260720_044001\n  - security-patch: ok (rc=0)\n  - app-update: ok (rc=0)\n  - health-check: ok (rc=0)\n\nPVE host · host-update · OK\n  - host-update: ok (rc=0)\n\n-- proxmox-adminupdater`;
+    box.innerHTML=`<pre style="margin:0;padding:14px 16px;font-family:var(--mono);font-size:12px;color:var(--ink-dim);white-space:pre-wrap;word-break:break-word">${txt}</pre>`;
+  }else{
+    box.style.background='#f1f5f9';
+    box.innerHTML=`<div style="padding:16px;font-family:system-ui,Arial,sans-serif">
+      <div style="background:#16a34a;color:#fff;border-radius:12px;padding:14px 18px">
+        <div style="font-size:17px;font-weight:800">◆ adminupdater — ${pl?'wszystko OK':'all OK'}</div>
+        <div style="opacity:.9;font-size:12px;margin-top:3px">host pve-demo · ${pl?'zadań':'jobs'}: 2 · OK: 2 · ${pl?'problemy':'problems'}: 0</div></div>
+      ${_card('CT 114 · update · OK','#16a34a','preupd_20260720_044001',['security-patch','app-update','health-check'])}
+      ${_card('PVE host · host-update · OK','#16a34a','—',['host-update'])}</div>`;
+  }
+}
 
 // ---------- WIZARD ----------
 let WSTEP=1;const WSCOPE={sec:true,app:'auto',reboot:false,hc:'auto'};

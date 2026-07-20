@@ -517,39 +517,90 @@ def _send_sendmail(msg):
         return False
 
 
-def deliver(cfg, subject, html):
+def deliver(cfg, subject, body, is_html=True):
+    subtype = "html" if is_html else "plain"
+    override = (cfg.get("notify_email") or "").strip()   # panel recipient override
     via = cfg.get("notify_via", "pve")
     if via == "pve":
         t = pve_smtp_target()
         if t:
-            msg = MIMEText(html, "html", "utf-8")
-            msg["Subject"], msg["From"], msg["To"] = subject, t["from"], ", ".join(t["mailto"])
+            rcpts = [override] if override else t["mailto"]
+            msg = MIMEText(body, subtype, "utf-8")
+            msg["Subject"], msg["From"], msg["To"] = subject, t["from"], ", ".join(rcpts)
             try:
                 send_via_smtp(t, msg)
-                print(f"raport wysłany przez PVE SMTP ({t['server']}) -> {', '.join(t['mailto'])}")
+                print(f"raport ({subtype}) wysłany przez PVE SMTP ({t['server']}) -> {', '.join(rcpts)}")
                 return True
             except Exception as e:  # noqa: BLE001
                 print(f"PVE SMTP nieudany: {e}; próbuję sendmail")
         else:
             print("brak skonfigurowanego targetu SMTP w PVE; próbuję sendmail")
-    to = cfg.get("notify_email")
+    to = override or cfg.get("notify_email")
     if not to:
         print("brak notify_email do fallbacku — pomijam wysyłkę")
         return False
-    msg = MIMEText(html, "html", "utf-8")
+    msg = MIMEText(body, subtype, "utf-8")
     msg["Subject"], msg["From"], msg["To"] = subject, cfg["notify_from"], to
     return _send_sendmail(msg)
 
 
-def maybe_notify(cfg, results):
-    if cfg["notify_on"] == "never" or not results:
-        return
+def build_email_text(results, host):
+    """Plain-text version of the report (for notify_format = text)."""
+    ok = sum(1 for r in results if r["status"] == "ok")
     bad = [r for r in results if r["status"] not in GOOD]
-    if cfg["notify_on"] == "errors" and not bad:
+    when = datetime.now().strftime("%Y-%m-%d %H:%M")
+    lines = [f"adminupdater — {'PROBLEMY' if bad else 'wszystko OK'}",
+             f"host {host} · {when} · zadań: {len(results)} · OK: {ok} · problemy: {len(bad)}",
+             "-" * 56]
+    for r in results:
+        label = "PVE host" if r.get("kind") == "host-update" else f"CT {r.get('ctid')}"
+        lines.append(f"{label} · {r.get('kind', 'update')} · {str(r['status']).upper()}")
+        if r.get("snapshot"):
+            lines.append(f"  snapshot: {r['snapshot']}")
+        for s in r.get("steps", []):
+            lines.append(f"  - {s.get('action')}: {s.get('status')} (rc={s.get('rc')})")
+        pruned = r.get("pruned") or []
+        if pruned:
+            lines.append(f"  pruned: {len(pruned)}")
+        lines.append("")
+    lines.append("-- proxmox-adminupdater")
+    return "\n".join(lines)
+
+
+def _notify_batch(cfg, results):
+    """Send ONE message for the given result set, honouring when/format."""
+    bad = [r for r in results if r["status"] not in GOOD]
+    if cfg.get("notify_on") == "errors" and not bad:
         return
     host = os.uname().nodename
     subject = f"[adminupdater] {host}: {'problemy' if bad else 'OK'} ({len(results)} zadań)"
-    deliver(cfg, subject, build_email_html(results, host))
+    if cfg.get("notify_format", "html") == "text":
+        deliver(cfg, subject, build_email_text(results, host), is_html=False)
+    else:
+        deliver(cfg, subject, build_email_html(results, host), is_html=True)
+
+
+def maybe_notify(cfg, results):
+    if cfg.get("notify_on") == "never" or not results:
+        return
+    if cfg.get("notify_grouping", "digest") == "per-run":
+        for r in results:                 # one e-mail per guest/job
+            _notify_batch(cfg, [r])
+    else:
+        _notify_batch(cfg, results)       # one digest for the whole window
+
+
+def apply_notify_cfg(cfg, notify):
+    """Overlay the panel-controlled notification settings (from /plan) onto cfg.
+    The transport (Proxmox SMTP) stays host-side; the panel only picks
+    when/grouping/format/recipient."""
+    if not isinstance(notify, dict):
+        return
+    cfg["notify_on"] = str(notify.get("when", cfg.get("notify_on", "errors")))
+    cfg["notify_grouping"] = str(notify.get("grouping", "digest"))
+    cfg["notify_format"] = str(notify.get("format", "html"))
+    if str(notify.get("email", "")).strip():
+        cfg["notify_email"] = str(notify["email"]).strip()
 
 
 def ping_progress(cfg, job):
@@ -716,30 +767,8 @@ def maybe_refresh_inventory(cfg):
     print(f"inventory odświeżone: {len(inv['guests'])} guestów, {len(inv['windows'])} okien backupu")
 
 
-def main():
-    cfg = load_cfg()
-    post_host_status(cfg)   # always refresh the banner, even with no jobs
-    results = []
-    for j in http(cfg, "/plan").get("jobs", []):
-        ping_progress(cfg, j)
-        r = do_job(cfg, j)
-        if j.get("qid"):        # echo so the brain can dequeue this ad-hoc job
-            r["qid"] = j["qid"]
-        results.append(r)
-    if results:
-        http(cfg, "/report", "POST", {"results": results})
-        maybe_notify(cfg, results)
-    maybe_refresh_inventory(cfg)   # throttled hourly; runs even when nothing was due
-    bad = [r for r in results if r["status"] not in GOOD]
-    print(f"wykonano {len(results)} zadań, {len(bad)} problemów")
-    sys.exit(1 if bad else 0)
-
-
-def test_notify():
-    """Send a sample HTML report through the configured channel (for setup checks)."""
-    cfg = load_cfg()
-    cfg["notify_on"] = "always"
-    sample = [
+def sample_results():
+    return [
         {"ctid": 108, "kind": "update", "status": "ok",
          "snapshot": "preupd_20260720_020000", "pruned": ["preupd_20260713_020000"],
          "steps": [{"action": "security-patch", "status": "ok", "rc": 0},
@@ -748,7 +777,38 @@ def test_notify():
         {"kind": "host-update", "status": "failed", "reboot": True,
          "steps": [{"action": "host-update", "status": "failed", "rc": 100}]},
     ]
-    maybe_notify(cfg, sample)
+
+
+def main():
+    cfg = load_cfg()
+    post_host_status(cfg)   # always refresh the banner, even with no jobs
+    plan = http(cfg, "/plan")
+    apply_notify_cfg(cfg, plan.get("notify"))   # panel-controlled when/grouping/format/recipient
+    results = []
+    for j in plan.get("jobs", []):
+        ping_progress(cfg, j)
+        r = do_job(cfg, j)
+        if j.get("qid"):        # echo so the brain can dequeue this ad-hoc job
+            r["qid"] = j["qid"]
+        results.append(r)
+    if results:
+        http(cfg, "/report", "POST", {"results": results})
+        maybe_notify(cfg, results)
+    if plan.get("notify_test"):    # "Send test" from the panel
+        tcfg = dict(cfg); tcfg["notify_on"] = "always"; tcfg["notify_grouping"] = "digest"
+        print("wysyłam e-mail testowy (żądanie z panelu)")
+        _notify_batch(tcfg, sample_results())
+    maybe_refresh_inventory(cfg)   # throttled hourly; runs even when nothing was due
+    bad = [r for r in results if r["status"] not in GOOD]
+    print(f"wykonano {len(results)} zadań, {len(bad)} problemów")
+    sys.exit(1 if bad else 0)
+
+
+def test_notify():
+    """Send a sample report through the configured channel (for setup checks)."""
+    cfg = load_cfg()
+    cfg["notify_on"] = "always"
+    _notify_batch(cfg, sample_results())
 
 
 if __name__ == "__main__":
