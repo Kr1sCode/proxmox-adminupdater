@@ -216,7 +216,11 @@ def api_guest_save(vmid):
 
 @app.route("/api/schedule/propose")
 def api_schedule_propose():
-    return jsonify(up.propose_schedule(core.load_config()))
+    # optional ?vmids=102,103 -> place exactly these (wizard's include/exclude);
+    # absent -> default set (every guest with a fresh backup)
+    raw = request.args.get("vmids")
+    vmids = [int(x) for x in raw.split(",") if x.strip().isdigit()] if raw else None
+    return jsonify(up.propose_schedule(core.load_config(), vmids))
 
 
 @app.route("/api/schedule/apply", methods=["POST"])

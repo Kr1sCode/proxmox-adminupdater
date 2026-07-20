@@ -535,12 +535,13 @@ const I18N={
     notifySaved:'Saved.',notifyTestQueued:'Test queued — the host sends it on its next tick (≤ 5 min).',
     // wizard
     wizEyebrow:'Wizard · first run',wizTitle:"Let's schedule safe updates for your fleet",wizClose:'Close (finish later)',wizBack:'Back',wizFinish:'Finish',
-    st1:'1 · Scan',st2:'2 · Backup coverage',st3:'3 · Schedule',st4:'4 · Scope + health',st5:'5 · Notifications',
+    st1:'1 · Scan',st2:'2 · Machines',st3:'3 · Schedule',st4:'4 · Scope + health',st5:'5 · Notifications',
     wizScanLead:'I scanned host {n}. Here is what I found:',scLxc:'LXC containers',scFresh:'have a fresh backup (< {h} h)',scSnaps:'snapshots total',scNoBk:'with no backup at all — risk',
     wizWinFound:'Detected backup window {w}',wizAvoiding:'avoiding this window',wizWinNone:'No backup job detected yet — the host learns windows from real backups.',
     wizNoBkList:'No backup — kept out of auto-update',wizNoBkNote:"I won't auto-update machines without a copy. You can enable them consciously.",
     next2:'Next: backup coverage →',next3:'Next: schedule →',next4:'Next: scope + health →',next5:'Next: notifications →',
-    wizCovLead:'Backup coverage per container. Machines without a fresh copy are excluded from automatic updates — no update is ever scheduled without a recoverable copy.',
+    wizCovLead:'Pick which machines the update schedule covers — tick to include, untick to exclude. Those without a fresh backup are unticked by default (the pre-update snapshot is still taken either way).',
+    wizCovNote:'Selected: {n} machine(s) to enrol.',wizLxcWindow:'LXC maintenance window',
     fresh:'fresh',stale:'stale',none:'none',
     wizSchedLead:'I place updates into your maintenance window and skip every backup window. Adjust and press Propose.',
     wizScopeLead:'Default policy applied to enrolled containers with a fresh backup:',
@@ -603,12 +604,13 @@ const I18N={
     notifyTest:'Wyślij test',notifyPreview:'Podgląd',notifyPreviewHint:'— przykład e-maila',
     notifySaved:'Zapisano.',notifyTestQueued:'Test zakolejkowany — host wyśle go przy następnym tiku (≤ 5 min).',
     wizEyebrow:'Kreator · pierwsze uruchomienie',wizTitle:'Ułóżmy bezpieczne aktualizacje Twojej floty',wizClose:'Zamknij (dokończę później)',wizBack:'Wstecz',wizFinish:'Zakończ',
-    st1:'1 · Skan',st2:'2 · Pokrycie backupem',st3:'3 · Harmonogram',st4:'4 · Zakres + health',st5:'5 · Powiadomienia',
+    st1:'1 · Skan',st2:'2 · Maszyny',st3:'3 · Harmonogram',st4:'4 · Zakres + health',st5:'5 · Powiadomienia',
     wizScanLead:'Przeskanowałem hosta {n}. Oto co znalazłem:',scLxc:'kontenerów LXC',scFresh:'ma świeży backup (< {h} h)',scSnaps:'migawek łącznie',scNoBk:'bez żadnej kopii — ryzyko',
     wizWinFound:'Wykryto okno backupu {w}',wizAvoiding:'omijam to okno',wizWinNone:'Nie wykryto jeszcze zadania backupu — host uczy się okien z realnych kopii.',
     wizNoBkList:'Brak backupu — pomijam z auto-update',wizNoBkNote:'Nie planuję automatycznych aktualizacji maszyn bez kopii. Możesz włączyć świadomie.',
     next2:'Dalej: pokrycie backupem →',next3:'Dalej: harmonogram →',next4:'Dalej: zakres + health →',next5:'Dalej: powiadomienia →',
-    wizCovLead:'Pokrycie backupem per kontener. Maszyny bez świeżej kopii są wykluczone z automatycznych aktualizacji — bez odtwarzalnej kopii żadna aktualizacja nie zostanie zaplanowana.',
+    wizCovLead:'Wybierz, które maszyny obejmuje harmonogram aktualizacji — zaznacz, by włączyć, odznacz, by pominąć. Te bez świeżej kopii są domyślnie odznaczone (migawka przed aktualizacją i tak jest robiona).',
+    wizCovNote:'Wybrano: {n} maszyn do objęcia.',wizLxcWindow:'Okno serwisowe LXC',
     fresh:'świeża',stale:'nieświeża',none:'brak',
     wizSchedLead:'Układam aktualizacje w Twoim oknie serwisowym i omijam każde okno backupu. Dostrój i naciśnij Zaproponuj.',
     wizScopeLead:'Domyślna polityka dla włączonych kontenerów ze świeżym backupem:',
@@ -893,12 +895,13 @@ el('hostbar').onclick=openHost;
 // ---------- planner dialog ----------
 let PLAN=null;
 el('proposeBtn').onclick=()=>{el('mApply').disabled=true;el('mPreview').innerHTML='';PLAN=null;el('sdlg').showModal();};
-async function doPropose(){
+async function doPropose(vmids){
   await fetch('/api/maintenance',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({window_start:el('mStart').value.trim(),window_end:el('mEnd').value.trim(),
       weekdays:[Math.max(0,Math.min(6,+el('mDay').value||6))],
       spacing_min:Math.max(1,+el('mSpace').value||20),concurrency:Math.max(1,+el('mConc').value||1)})});
-  PLAN=await fetch('/api/schedule/propose').then(r=>r.json());return PLAN;
+  const q=(vmids&&vmids.length)?('?vmids='+vmids.join(',')):'';
+  PLAN=await fetch('/api/schedule/propose'+q).then(r=>r.json());return PLAN;
 }
 el('mPropose').onclick=async()=>{renderPlan(await doPropose(),el('mPreview'),el('mApply'));};
 function renderPlan(p,box,applyBtn){
@@ -1026,7 +1029,8 @@ function renderNotifyPreview(){
 
 // ---------- WIZARD ----------
 let WSTEP=1;const WSCOPE={sec:true,app:'auto',reboot:false,hc:'auto'};
-el('openWiz').onclick=()=>{WSTEP=1;el('wiz').showModal();renderWiz();};
+let WSEL=null;   // Set of vmids to enroll (null = not yet initialised)
+el('openWiz').onclick=()=>{WSTEP=1;WSEL=null;PLAN=null;el('wiz').showModal();renderWiz();bootIcons(el('wiz'));};
 el('wizClose').onclick=()=>{localStorage.setItem('au_wizard_done','1');el('wiz').close();};
 el('wizBack').onclick=()=>{if(WSTEP>1){WSTEP--;renderWiz();}};
 async function applyWizHost(){
@@ -1038,7 +1042,7 @@ async function applyWizHost(){
   await fetch('/api/host-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 }
 el('wizNext').onclick=async()=>{
-  if(WSTEP===3){await applyWizHost(); if(!PLAN)await doPropose();}   // save host anchor + ensure a proposal exists
+  if(WSTEP===3){await applyWizHost(); if(!PLAN)await doPropose([...(WSEL||[])]);}   // save host anchor + ensure a proposal exists
   if(WSTEP<5){WSTEP++;renderWiz();return;}
   await wizFinish();
 };
@@ -1069,22 +1073,30 @@ function renderWiz(){
       :`<div class="prop"><div class="note">${t('wizWinNone')}</div></div>`}
       ${noBk.length?`<div class="prop"><div class="row"><b>${noBk.map(x=>x.name+' ('+x.vmid+')').join(', ')}</b><span class="toggle" style="color:var(--warn);background:var(--warn-bg)">${t('wizNoBkList')}</span></div><div class="note">${t('wizNoBkNote')}</div></div>`:''}`;
   }else if(WSTEP===2){
+    if(WSEL===null)WSEL=new Set(g.filter(x=>x.backup&&x.backup.fresh).map(x=>x.vmid));
     const rows=g.map(x=>{const bk=x.backup||{};const st=bk.info?(bk.fresh?`<span class="chip good">${t('fresh')}</span>`:`<span class="chip warn">${t('stale')}</span>`):`<span class="chip crit">${t('none')}</span>`;
-      return `<div class="r"><span>${x.name} <span class="muted mono">${x.vmid}</span> <span class="os">${osIcon(x.os)} ${x.os||''}</span></span>${st}</div>`;}).join('');
-    b.innerHTML=`<p style="color:var(--ink-dim)">${t('wizCovLead')}</p><div class="covlist">${rows}</div>`;
+      return `<div class="r"><label style="display:flex;gap:9px;align-items:center;cursor:pointer;flex:1;min-width:0">
+        <input type="checkbox" class="wsel" data-vmid="${x.vmid}" ${WSEL.has(x.vmid)?'checked':''}>
+        <span style="overflow:hidden;text-overflow:ellipsis">${x.name} <span class="muted mono">${x.vmid}</span> <span class="os">${osIcon(x.os)} ${x.os||''}</span></span></label>${st}</div>`;}).join('');
+    b.innerHTML=`<p style="color:var(--ink-dim)">${t('wizCovLead')}</p><div class="covlist">${rows}</div>
+      <p class="note">${t('wizCovNote',{n:WSEL.size})}</p>`;
+    b.querySelectorAll('.wsel').forEach(c=>c.onchange=()=>{const v=+c.dataset.vmid;c.checked?WSEL.add(v):WSEL.delete(v);PLAN=null;
+      b.querySelector('.note').textContent=t('wizCovNote',{n:WSEL.size});});
   }else if(WSTEP===3){
     b.innerHTML=`<p style="color:var(--ink-dim)">${t('wizSchedLead')}</p>
+      <div class="prop" style="background:linear-gradient(90deg,var(--warn-bg),transparent 70%)">
+        <label style="margin-top:0">${ic('shield','warn')} ${t('wizHostTitle')}</label>
+        <div class="row" style="margin-top:.2rem"><input type="checkbox" id="wHostEn"><label style="margin:0">${t('wizHostEnable')}</label></div>
+        <div class="grid2"><div><label class="thin">${t('timeLbl')}</label><input type="text" id="wHostTime"></div>
+        <div><label class="thin">${t('maintDay')}</label><input type="number" id="wHostDay" min="0" max="6"></div></div>
+        <p class="note" style="margin-bottom:0">${t('wizHostNote')}</p>
+      </div>
+      <label style="margin-top:.8rem">${t('wizLxcWindow')}</label>
       <div class="grid2"><div><label class="thin" data-i18n="winStart">${t('winStart')}</label><input type="text" id="wStart" value="${el('mStart').value||'01:30'}"></div>
       <div><label class="thin" data-i18n="winEnd">${t('winEnd')}</label><input type="text" id="wEnd" value="${el('mEnd').value||'05:00'}"></div></div>
       <div class="grid2"><div><label class="thin">${t('maintDay')}</label><input type="number" id="wDay" min="0" max="6" value="${el('mDay').value||6}"></div>
       <div><label class="thin">${t('spacing')}</label><input type="number" id="wSpace" min="1" value="${el('mSpace').value||20}"></div></div>
-      <hr>
-      <label>${t('wizHostTitle')}</label>
-      <div class="row" style="margin-top:.2rem"><input type="checkbox" id="wHostEn"><label style="margin:0">${t('wizHostEnable')}</label></div>
-      <div class="grid2"><div><label class="thin">${t('timeLbl')}</label><input type="text" id="wHostTime"></div>
-      <div><label class="thin">${t('maintDay')}</label><input type="number" id="wHostDay" min="0" max="6"></div></div>
-      <p class="note">${t('wizHostNote')}</p>
-      <div style="display:flex;gap:.5rem;margin-top:.6rem"><button class="btn primary" id="wPropose">${t('propose')}</button></div>
+      <div style="display:flex;gap:.5rem;margin-top:.8rem"><button class="btn primary" id="wPropose">${t('propose')}</button></div>
       <div id="wPreview" style="margin-top:.8rem"></div>`;
     el('wHostEn').checked=!!HU.enabled;
     el('wHostTime').value=(HU.times||['02:00'])[0];
@@ -1092,7 +1104,7 @@ function renderWiz(){
     el('wPropose').onclick=async()=>{
       el('mStart').value=el('wStart').value;el('mEnd').value=el('wEnd').value;el('mDay').value=el('wDay').value;el('mSpace').value=el('wSpace').value;
       await applyWizHost();
-      renderPlan(await doPropose(),el('wPreview'),null);};
+      renderPlan(await doPropose([...(WSEL||[])]),el('wPreview'),null);};
     if(PLAN)renderPlan(PLAN,el('wPreview'),null);
   }else if(WSTEP===4){
     b.innerHTML=`<p style="color:var(--ink-dim)">${t('wizScopeLead')}</p>
@@ -1127,6 +1139,14 @@ async function wizFinish(){
         security_patch:WSCOPE.sec,app_update:WSCOPE.app==='auto'?'auto':null,pre_snapshot:true,
         auto_reboot:WSCOPE.reboot,
         health_check:{type:WSCOPE.hc,arg:(cur.health_check||{}).arg||''},force:true})});
+  }
+  // honour exclusions: disable any machine the user unchecked that is still enabled
+  const placed=new Set((PLAN.plan||[]).map(p=>p.vmid));
+  for(const gx of (DATA.guests||[])){
+    if(gx.config.enabled && !placed.has(gx.vmid) && WSEL && !WSEL.has(gx.vmid)){
+      await fetch('/api/guests/'+gx.vmid,{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({...gx.config,enabled:false,force:true})});
+    }
   }
   localStorage.setItem('au_wizard_done','1');
   el('wiz').close();alert(t('wizApplyDone'));load();

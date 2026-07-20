@@ -77,7 +77,7 @@ CTID="${AU_CTID:-$DEF_CTID}";      HOSTNAME="${AU_HOSTNAME:-$DEF_HOST}"
 DISK="${AU_DISK:-$DEF_DISK}";      CORES="${AU_CORES:-$DEF_CORES}"
 RAM="${AU_RAM:-$DEF_RAM}";         STORE="${AU_STORE:-$DEF_STORE}"
 BRIDGE="${AU_BRIDGE:-$DEF_BRIDGE}"; DNS="${AU_NS:-}"; NESTING="${AU_NESTING:-1}"
-ALLOW_ALL="${AU_ALLOW_ALL:-0}"           # 1 = host.conf allowed_ctids = * (trust panel)
+ALLOW_ALL="${AU_ALLOW_ALL:-1}"           # 1 = host.conf allowed_ctids = * (trust panel; default on)
 # timezone: schedules are computed in the CONTAINER's local time, so it must match
 # the host (backup windows are learned host-side). Default to the host's own zone.
 DEF_TZ="$(timedatectl show --value -p Timezone 2>/dev/null || cat /etc/timezone 2>/dev/null \
@@ -120,7 +120,7 @@ if [ "$WIZARD" = "whiptail" ]; then
     else
       NESTING=0
     fi
-    if "${WT[@]}" --yesno "Zezwolić OD RAZU na wszystkie kontenery (allowed_ctids = *)?\n\nWygodne — whitelista z panelu wystarcza. Ale słabsza izolacja: przejęty panel mógłby zlecić update na dowolny CT.\n\nZalecane: Nie — CT dopiszesz ręcznie w host.conf." 14 70 --defaultno; then
+    if "${WT[@]}" --yesno "Zezwolić na wszystkie kontenery (allowed_ctids = *)?\n\nDomyślnie TAK — whitelista z panelu wystarcza (wygodne). Wybierz Nie dla ściślejszej izolacji: wtedy każdy CT dopiszesz ręcznie w host.conf." 13 70; then
       ALLOW_ALL=1
     else
       ALLOW_ALL=0
@@ -155,7 +155,7 @@ elif [ "$WIZARD" = "text" ]; then
     if [ -n "$IP4" ]; then IP4MODE=static; GW="$(tx 'Brama (gateway)' '')"; fi
     DNS="$(tx 'DNS (puste = dziedzicz z hosta)' '')"
     a="$(ask 'Nesting? [T/n]:')"; [ "${a,,}" = n ] && NESTING=0 || NESTING=1
-    a="$(ask 'Zezwolić na WSZYSTKIE CT (allowed_ctids = *)? — wygodne, mniej bezpieczne [t/N]:')"; [ "${a,,}" = t ] && ALLOW_ALL=1 || ALLOW_ALL=0
+    a="$(ask 'Zezwolić na WSZYSTKIE CT (allowed_ctids = *)? — domyślnie tak, wygodne [T/n]:')"; [ "${a,,}" = n ] && ALLOW_ALL=0 || ALLOW_ALL=1
   fi
   echo
   echo "   Podsumowanie: CT ${CTID} ($([ "$CTTYPE" = 1 ] && echo unpriv || echo priv)) · ${CORES}vCPU/${RAM}MiB/${DISK}GB · ${STORE} · ${BRIDGE} · $([ "$IP4MODE" = static ] && echo "$IP4 gw=${GW}" || echo DHCP)"
