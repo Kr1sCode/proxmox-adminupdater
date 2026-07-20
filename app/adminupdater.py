@@ -155,6 +155,20 @@ def record_report(results):
 
 
 RUNNING_STALE = 2 * 3600   # a "running" marker older than this is treated as dead
+HOST_KEY = "_host"         # state slot for the PVE host's own update status
+
+
+def set_host_status(data):
+    """Store the PVE host's update status (pending count, reboot flag, version),
+    posted by the host executor. Drives the top banner."""
+    state = core.load_state()
+    state[HOST_KEY] = dict(data or {})
+    core.save_state(state)
+    return {"ok": True}
+
+
+def get_host_status():
+    return core.load_state().get(HOST_KEY)
 
 
 def set_running(ctid, kind):
@@ -185,7 +199,7 @@ def guest_view():
                     "config": guest_settings(cfg, vmid),
                     "report": st.get("last"), "report_snap": st.get("last_snap"),
                     "running": running})
-    return {"settings": cfg["settings"], "guests": out}
+    return {"settings": cfg["settings"], "guests": out, "host": state.get(HOST_KEY)}
 
 
 if __name__ == "__main__":

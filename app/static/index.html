@@ -31,6 +31,11 @@
   .spin{display:inline-block;width:13px;height:13px;border:2px solid var(--bd);border-top-color:var(--accent);border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px}
   @keyframes sp{to{transform:rotate(360deg)}}
   tr.running{background:color-mix(in srgb,var(--accent) 8%,transparent)}
+  #hostbar{padding:.55rem 1.2rem;font-weight:800;font-size:.95rem;border-bottom:1px solid var(--bd);letter-spacing:.01em}
+  #hostbar.pending{background:#f59e0b;color:#111827}
+  #hostbar.clean{background:#16a34a;color:#fff}
+  #hostbar.reboot{background:#dc2626;color:#fff}
+  #hostbar.unknown{background:var(--card);color:var(--muted);font-weight:600}
   pre#logbox{margin:0;padding:.8rem 1rem;font:12.5px/1.5 ui-monospace,monospace;white-space:pre-wrap;word-break:break-word}
   dialog{border:1px solid var(--bd);border-radius:12px;padding:1.2rem;max-width:460px;width:92%;max-height:88vh;overflow-y:auto;color:var(--fg);background:var(--card)}
   dialog hr{border:0;border-top:1px solid var(--bd);margin:1rem 0}
@@ -52,6 +57,8 @@
   <button id="pauseBtn"></button>
   <button id="logout" data-i18n="logout">Log out</button>
 </header>
+
+<div id="hostbar" style="display:none"></div>
 
 <nav>
   <button class="tab active" data-tab="guests" data-i18n="containers">Containers</button>
@@ -155,7 +162,8 @@ const I18N={
     healthTitle:'Health-check after update',healthHint:'(failure → rollback)',hcNone:'— none —',hcArgPh:'nginx  |  http://127.0.0.1/health',
     snapSched:'Snapshot schedule',snapHint:'(independent of updates, auto_ prefix)',
     mode:'Mode',prefix:'Prefix',keepShort:'Keep newest',ageShort:'Delete older than (days)',dryrun:'Dry-run',
-    cancel:'Cancel',save:'Save'},
+    cancel:'Cancel',save:'Save',
+    pveHost:'PVE host',hUpdates:'updates pending',hUpToDate:'up to date',hReboot:'reboot required after update',hUnknown:'update status unknown (waiting for host)'},
   pl:{containers:'Kontenery',log:'Log',logout:'Wyloguj',pause:'⏸ Pauza globalna',resume:'▶ Wznów',pauseTag:'PAUZA',
     thCT:'CT',thName:'Nazwa',thStatus:'Status',thSchedule:'Harmonogram',thScope:'Zakres',thRetention:'Retencja',thLast:'Ostatnio',
     edit:'Edytuj',disabled:'wyłączony',allDays:'wsz.',daysWord:'dni',
@@ -168,7 +176,8 @@ const I18N={
     healthTitle:'Health-check po aktualizacji',healthHint:'(porażka → rollback)',hcNone:'— brak —',hcArgPh:'nginx  |  http://127.0.0.1/health',
     snapSched:'Harmonogram migawek',snapHint:'(niezależny od aktualizacji, prefix auto_)',
     mode:'Tryb',prefix:'Prefix',keepShort:'Trzymaj ostatnie',ageShort:'Kasuj starsze niż (dni)',dryrun:'Dry-run',
-    cancel:'Anuluj',save:'Zapisz'}
+    cancel:'Anuluj',save:'Zapisz',
+    pveHost:'Host PVE',hUpdates:'aktualizacji do zainstalowania',hUpToDate:'aktualny',hReboot:'wymagany restart po aktualizacji',hUnknown:'status nieznany (czekam na hosta)'}
 };
 let LANG=localStorage.getItem('au_lang')||'en';
 const t=k=>(I18N[LANG]&&I18N[LANG][k])||(I18N.en[k])||k;
@@ -200,10 +209,21 @@ document.querySelectorAll('nav .tab').forEach(b=>b.onclick=()=>{
   if(b.dataset.tab==='log'){stopGuestsAuto();loadLog();startLogAuto();} else {stopLogAuto();load();startGuestsAuto();}
 });
 
+// ---- PVE host update banner ----
+function renderHostbar(h){
+  const hb=el('hostbar'); hb.style.display='block';
+  const pve=h&&h.pve?` — ${h.pve}`:'';
+  if(h&&h.reboot){hb.className='reboot';hb.textContent=`⚠️ ${t('pveHost')}: ${t('hReboot')}${pve}`;}
+  else if(h&&h.pending>0){hb.className='pending';hb.textContent=`⬆️ ${t('pveHost')}: ${h.pending} ${t('hUpdates')}${pve}`;}
+  else if(h&&h.pending===0){hb.className='clean';hb.textContent=`✔ ${t('pveHost')}: ${t('hUpToDate')}${pve}`;}
+  else {hb.className='unknown';hb.textContent=`${t('pveHost')}: ${t('hUnknown')}`;}
+}
+
 // ---- guests ----
 async function load(){
   const d=await (await fetch('/api/guests')).json();
   SET=d.settings;
+  renderHostbar(d.host);
   el('pauseBtn').textContent=SET.paused?t('resume'):t('pause');
   el('pausetag').innerHTML=SET.paused?`<span class="tag pause">${t('pauseTag')}</span>`:'';
   const rows=el('rows'); rows.innerHTML='';

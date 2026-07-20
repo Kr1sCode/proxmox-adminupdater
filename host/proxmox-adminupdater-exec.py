@@ -355,8 +355,34 @@ def ping_progress(cfg, job):
         pass
 
 
+def host_status():
+    """Read-only view of the PVE host's own update state for the top banner.
+    Uses the existing apt lists (no forced refresh) — the host's own cron keeps
+    them current. Never modifies anything."""
+    st = {"checked": datetime.now(timezone.utc).isoformat(), "pve": "",
+          "pending": None, "reboot": os.path.exists("/var/run/reboot-required")}
+    rc, out = run(["pveversion"], 15)
+    if rc == 0 and out.strip():
+        st["pve"] = out.strip().splitlines()[0]
+    rc, out = run(["bash", "-lc", "apt-get -s dist-upgrade 2>/dev/null | grep -c '^Inst '"], 60)
+    if rc in (0, 1):  # grep -c returns 1 when count is 0
+        try:
+            st["pending"] = int(out.strip() or 0)
+        except ValueError:
+            st["pending"] = None
+    return st
+
+
+def post_host_status(cfg):
+    try:
+        http(cfg, "/host-status", "POST", host_status())
+    except Exception:  # noqa: BLE001 - status is best-effort
+        pass
+
+
 def main():
     cfg = load_cfg()
+    post_host_status(cfg)   # always refresh the banner, even with no jobs
     jobs = http(cfg, "/plan").get("jobs", [])
     if not jobs:
         print("nic do zrobienia")
