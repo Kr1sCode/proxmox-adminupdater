@@ -115,8 +115,9 @@
               border-bottom:1px solid var(--border-soft);margin-bottom:4px}
   .gantt-axis span{position:absolute;bottom:5px;white-space:nowrap}
   .gantt-rows{position:relative;display:flex;flex-direction:column}
-  .ggrid{position:absolute;top:0;bottom:0;left:208px;right:0;pointer-events:none;z-index:0}
-  .ggrid i{position:absolute;top:0;bottom:0;border-left:1px dashed var(--ink-mute);opacity:.2}
+  .ggrid{position:absolute;top:0;bottom:0;left:208px;right:0;pointer-events:none;z-index:2}
+  .ggrid i{position:absolute;top:0;bottom:0;border-left:1px dashed rgba(130,148,175,.55)}
+  html[data-theme="light"] .ggrid i{border-left-color:rgba(90,105,130,.45)}
   .grow{padding:5px 0;border-bottom:1px solid var(--border-soft);position:relative;z-index:1}
   .grow:last-child{border-bottom:0}
   .grow.ref{background:linear-gradient(90deg,var(--surface-2),transparent 70%);border-radius:6px}
