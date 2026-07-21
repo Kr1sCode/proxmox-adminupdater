@@ -106,7 +106,7 @@
   .rlegend{display:flex;gap:16px;flex-wrap:wrap;margin-top:11px;font-size:12px;color:var(--ink-dim)}
   .rlegend span{display:inline-flex;gap:7px;align-items:center}
   .sw{width:11px;height:11px;border-radius:3px;display:inline-block}
-  .sw.backup{background:var(--crit)}.sw.hostu{background:var(--warn)}.sw.guest{background:var(--accent)}.sw.snap{background:#e08a2b}
+  .sw.backup{background:var(--crit)}.sw.hostu{background:var(--warn)}.sw.guest{background:var(--accent)}.sw.snap{background:#e08a2b}.sw.maint{background:var(--ink-mute)}
 
   /* per-row schedule gantt */
   .gantt{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--r);padding:14px 16px 12px}
@@ -143,6 +143,16 @@
   .gseg.bad .upd{background:var(--crit)}
   .gseg.bad .cap{background:var(--crit)}
   .glbl.bad{color:var(--crit);font-weight:650}
+  /* host maintenance rows (read-only situational awareness) */
+  .grow.maint .glabel .nm{color:var(--ink-dim);font-weight:500}
+  .grow.maint.promoted{background:linear-gradient(90deg,rgba(120,137,163,.12),transparent 60%)}
+  .gmark{position:absolute;top:8px;bottom:8px;width:5px;border-radius:3px}
+  .gmark.crit{background:var(--crit)}.gmark.warn{background:var(--warn)}
+  .gband.maintzone{background:repeating-linear-gradient(45deg,rgba(120,137,163,.16),rgba(120,137,163,.16) 5px,transparent 5px,transparent 10px);border-left:2px dotted var(--ink-mute);border-right:2px dotted var(--ink-mute)}
+  .fbtn{margin-left:auto;background:transparent;border:1px solid var(--border);color:var(--ink-mute);border-radius:6px;padding:2px 5px;cursor:pointer;line-height:1;flex:none}
+  .fbtn:hover{border-color:var(--accent);color:var(--ink)}
+  .fbtn.on{border-color:var(--crit);color:var(--crit);background:var(--crit-bg)}
+  .fbtn .ic{width:13px;height:13px;vertical-align:-2px}
 
   /* guest table */
   .panel{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--r);overflow:hidden}
@@ -262,6 +272,7 @@
         <span><i class="sw hostu"></i> <span data-i18n="legHost">Host update</span></span>
         <span><i class="sw guest"></i> <span data-i18n="legGuest">LXC update</span></span>
         <span><i class="sw snap"></i> <span data-i18n="legSnap">Snapshot: create → prune</span></span>
+        <span><i class="sw maint"></i> <span data-i18n="legMaint">Host maintenance (disk IO)</span></span>
       </div>
     </div>
   </section>
@@ -488,7 +499,9 @@ const I18N={
     edit:'Edit',disabled:'disabled',allDays:'daily',paused:'paused',
     refresh:'Refresh',autoLbl:'auto (5 s)',logMeta:'last 200 lines',empty:'(empty)',
     ribbonTitle:'Service window',ribbonHint:'— the two anchors: the host update and its backup window; LXCs are laid out around them',
-    legBackup:'Backup (never schedule here)',legHost:'Host update',legGuest:'LXC update',legSnap:'Snapshot: create → prune',
+    legBackup:'Backup (never schedule here)',legHost:'Host update',legGuest:'LXC update',legSnap:'Snapshot: create → prune',legMaint:'Host maintenance (disk IO)',
+    ganttAvoid:'avoid this window (make it a forbidden zone)',ganttUnavoid:'stop avoiding this window',
+    wizHostJobsTitle:'Other scheduled activity on the host',wizHostJobsNote:'Read-only — these compete for the host disks. On the timeline you can mark any of them “avoid” so updates keep clear.',wizHostJobsLight:'…and {n} light task(s).',wizHostJobsNone:'No heavy host maintenance detected.',
     windowTab:'Service window',machinesTitle:'LXC machines',rowHint:'click = details / policy',
     ganttBackup:'Backup window',ganttDaily:'daily',ganttHostRow:'Host update',ganttNoSched:'not scheduled',ganttOffWindow:'outside the night window',ganttConflict:'overlaps a forbidden slot — re-run Plan schedule',
     ganttSnapC:'📷 snapshot',ganttSnapP:'🗑 prune',ganttNoEnabled:'No LXC has an update schedule yet — use “Plan schedule”.',
@@ -558,7 +571,9 @@ const I18N={
     edit:'Edytuj',disabled:'wyłączony',allDays:'codz.',paused:'pauza',
     refresh:'Odśwież',autoLbl:'auto (5 s)',logMeta:'ostatnie 200 linii',empty:'(pusto)',
     ribbonTitle:'Okno serwisowe',ribbonHint:'— dwa filary: aktualizacja hosta i jego okno backupu; LXC układane wokół nich',
-    legBackup:'Backup (nie planuj tu aktualizacji)',legHost:'Aktualizacja hosta',legGuest:'Aktualizacja LXC',legSnap:'Migawka: utworzenie → prune',
+    legBackup:'Backup (nie planuj tu aktualizacji)',legHost:'Aktualizacja hosta',legGuest:'Aktualizacja LXC',legSnap:'Migawka: utworzenie → prune',legMaint:'Konserwacja hosta (IO dysków)',
+    ganttAvoid:'omijaj to okno (zrób z niego strefę zakazaną)',ganttUnavoid:'przestań omijać to okno',
+    wizHostJobsTitle:'Inne zaplanowane zadania na hoście',wizHostJobsNote:'Tylko podgląd — konkurują o dyski hosta. Na osi czasu możesz oznaczyć dowolne „omijaj", by aktualizacje trzymały się z dala.',wizHostJobsLight:'…oraz {n} lekkich zadań.',wizHostJobsNone:'Nie wykryto ciężkiej konserwacji hosta.',
     windowTab:'Okno serwisowe',machinesTitle:'Maszyny LXC',rowHint:'klik = szczegóły / edycja polityki',
     ganttBackup:'Okno backupu',ganttDaily:'codziennie',ganttHostRow:'Aktualizacja hosta',ganttNoSched:'brak harmonogramu',ganttOffWindow:'poza oknem nocnym',ganttConflict:'nachodzi na strefę zakazaną — uruchom ponownie Zaplanuj harmonogram',
     ganttSnapC:'📷 migawka',ganttSnapP:'🗑 prune',ganttNoEnabled:'Żaden LXC nie ma jeszcze harmonogramu — użyj „Zaplanuj harmonogram".',
@@ -743,6 +758,9 @@ function renderGantt(d){
     return `<div class="gband backup" style="left:${l}%;width:${width}%"></div>`;
   }).join('');
   if(hostM!=null&&inAxis(hostM))bands+=`<div class="gband hostzone" style="left:${ribPct(hostM)}%;width:${Math.max(3,mPct(30))}%"></div>`;
+  const EF=d.extra_forbidden||{};
+  for(const k in EF){const z=EF[k];if(z&&z.start_min!=null&&inAxis(z.start_min))
+    bands+=`<div class="gband maintzone" style="left:${ribPct(z.start_min)}%;width:${Math.max(2,mPct((((z.end_min-z.start_min)%1440)+1440)%1440))}%"></div>`;}
   const track=inner=>`<div class="gtrack">${bands}${inner}</div>`;
 
   let html='';
@@ -757,12 +775,28 @@ function renderGantt(d){
     track((hostM!=null&&inAxis(hostM))?`<div class="gbar hostu" style="left:${ribPct(hostM)}%;width:${Math.max(6,mPct(30))}%">${fmtMin(hostM)}</div>`
             :`<span class="gempty">${t('ganttNoSched')}</span>`)+`</div>`;
 
-  // is a minute inside a forbidden zone (a backup window, or the host slot)?
+  // --- host maintenance rows (read-only) — other scheduled disk-IO on the host ---
+  const hj=((inv.host_jobs&&inv.host_jobs.jobs)||[]).filter(j=>j.start_min!=null&&inAxis(j.start_min))
+    .sort((a,b)=>ribNorm(a.start_min)-ribNorm(b.start_min));
+  for(const j of hj){
+    const promoted=!!EF[j.id], iocls=j.io==='heavy'?'crit':'warn', dur=j.io==='heavy'?90:45;
+    const lblLeft=Math.min(86,ribPct(j.start_min)+1.6);
+    const inner=`<div class="gmark ${iocls}" style="left:${ribPct(j.start_min)}%" title="${j.name} · ${j.sched}"></div>`+
+      `<span class="glbl mut" style="left:${lblLeft}%">${j.approx?'~':''}${fmtMin(j.start_min)}</span>`;
+    html+=`<div class="grow maint${promoted?' promoted':''}"><div class="glabel">
+      <span class="nm">${ic('clock',iocls)} ${j.name}</span>
+      <button class="fbtn ${promoted?'on':''}" data-fid="${j.id}" data-fs="${j.start_min}" data-fe="${(j.start_min+dur)%1440}" data-fl="${j.name.replace(/"/g,'')}" title="${promoted?t('ganttUnavoid'):t('ganttAvoid')}">${ic(promoted?'x':'shield')}</button>
+      </div>${track(inner)}</div>`;
+  }
+
+  // is a minute inside a forbidden zone (backup window, host slot, or a promoted job)?
   const inZone=m=>{
     for(const w of (inv.windows||[])){const s=+w.start_min,e=+w.end_min;
       if((s<=e)?(s<=m&&m<e):(m>=s||m<e))return 'backup';}
     if(hostM!=null){const s=hostM,e=(hostM+30)%1440;
       if((s<=e)?(s<=m&&m<e):(m>=s||m<e))return 'host';}
+    for(const k in EF){const z=EF[k];const s=+z.start_min,e=+z.end_min;
+      if((s<=e)?(s<=m&&m<e):(m>=s||m<e))return 'maint';}
     return null;
   };
   // --- one row per enabled LXC ---
@@ -793,6 +827,12 @@ function renderGantt(d){
     html+=`<div class="grow${zone?' conflict':''}"><div class="glabel"><span class="nm">${g.name}</span><span class="id">${g.vmid}</span><span class="day">${wdList(g.wds)}</span></div>${track(inner)}</div>`;
   }
   el('ganttRows').innerHTML=html;
+  el('ganttRows').querySelectorAll('.fbtn').forEach(btn=>btn.onclick=async()=>{
+    const on=!btn.classList.contains('on');
+    await fetch('/api/forbidden',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({id:btn.dataset.fid,on,start_min:+btn.dataset.fs,end_min:+btn.dataset.fe,label:btn.dataset.fl})});
+    load();
+  });
 }
 
 // ---------- guest table ----------
@@ -1052,6 +1092,17 @@ function renderWizSteps(){
   el('wizBack').disabled=WSTEP===1;
   el('wizNext').textContent=[null,t('next2'),t('next3'),t('next4'),t('next5'),t('wizApplyPlan')][WSTEP];
 }
+function hostJobsBlock(inv){
+  const hjs=(inv.host_jobs&&inv.host_jobs.jobs)||[], light=(inv.host_jobs&&inv.host_jobs.light_count)||0;
+  if(!hjs.length&&!light)return '';
+  const badge=io=>io==='heavy'?`<span class="chip crit">IO ↑↑</span>`:`<span class="chip warn">IO ↑</span>`;
+  const rows=hjs.map(j=>`<div class="r"><span>${ic('clock',j.io==='heavy'?'crit':'warn')} ${j.name} <span class="muted mono">${j.approx?'~':''}${j.start_min!=null?fmtMin(j.start_min):j.sched}</span></span>${badge(j.io)}</div>`).join('')
+    || `<div class="r muted">${t('wizHostJobsNone')}</div>`;
+  return `<div class="prop"><b>${t('wizHostJobsTitle')}</b>
+    <div class="covlist" style="margin-top:.5rem;max-height:26vh">${rows}</div>
+    ${light?`<div class="note">${t('wizHostJobsLight',{n:light})}</div>`:''}
+    <div class="note">${t('wizHostJobsNote')}</div></div>`;
+}
 function renderWiz(){
   renderWizSteps();const g=DATA.guests||[],inv=DATA.inventory||{},b=el('wizBody');
   const total=g.length,fresh=g.filter(x=>x.backup&&x.backup.fresh).length;
@@ -1071,7 +1122,8 @@ function renderWiz(){
       ${win?`<div class="prop"><div class="row"><b>${t('wizWinFound',{w:fmtMin(win.start_min)+'–'+fmtMin(win.end_min)})}</b><span class="toggle">${t('wizAvoiding')}</span></div>
         <div class="note">${t('ribbonHint').replace(/^—\s*/,'')}</div></div>`
       :`<div class="prop"><div class="note">${t('wizWinNone')}</div></div>`}
-      ${noBk.length?`<div class="prop"><div class="row"><b>${noBk.map(x=>x.name+' ('+x.vmid+')').join(', ')}</b><span class="toggle" style="color:var(--warn);background:var(--warn-bg)">${t('wizNoBkList')}</span></div><div class="note">${t('wizNoBkNote')}</div></div>`:''}`;
+      ${noBk.length?`<div class="prop"><div class="row"><b>${noBk.map(x=>x.name+' ('+x.vmid+')').join(', ')}</b><span class="toggle" style="color:var(--warn);background:var(--warn-bg)">${t('wizNoBkList')}</span></div><div class="note">${t('wizNoBkNote')}</div></div>`:''}
+      ${hostJobsBlock(inv)}`;
   }else if(WSTEP===2){
     if(WSEL===null)WSEL=new Set(g.filter(x=>x.backup&&x.backup.fresh).map(x=>x.vmid));
     const rows=g.map(x=>{const bk=x.backup||{};const st=bk.info?(bk.fresh?`<span class="chip good">${t('fresh')}</span>`:`<span class="chip warn">${t('stale')}</span>`):`<span class="chip crit">${t('none')}</span>`;

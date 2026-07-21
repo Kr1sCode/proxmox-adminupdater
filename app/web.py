@@ -296,6 +296,16 @@ def api_host_update():
     return jsonify({"ok": True, "host_update": hu})
 
 
+@app.route("/api/forbidden", methods=["POST"])
+def api_forbidden():
+    b = request.get_json(force=True) or {}
+    ef = up.set_extra_forbidden(str(b.get("id", "")), bool(b.get("on")),
+                                b.get("start_min"), b.get("end_min"), str(b.get("label", "")))
+    _audit(f"strefa zakazana {'+' if b.get('on') else '−'}: "
+           f"{b.get('label') or b.get('id')}")
+    return jsonify({"ok": True, "extra_forbidden": ef})
+
+
 @app.route("/api/notify", methods=["POST"])
 def api_notify():
     body = request.get_json(force=True) or {}

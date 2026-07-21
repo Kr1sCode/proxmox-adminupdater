@@ -413,7 +413,27 @@ def forbidden_zones(cfg, inv, weekday):
         hs = _hhmm((hu.get("times") or ["02:00"])[0])
         if hs is not None:
             zones.append((hs, (hs + 30) % 1440))
+    # host-maintenance jobs the user promoted to "avoid" (ZFS scrub, mdadm check…)
+    for z in (cfg.get("extra_forbidden") or {}).values():
+        try:
+            zones.append((int(z["start_min"]), int(z["end_min"])))
+        except (KeyError, TypeError, ValueError):
+            pass
     return zones
+
+
+def set_extra_forbidden(job_id, on, start_min=None, end_min=None, label=""):
+    """Promote/demote a detected host-maintenance job to a hard forbidden zone."""
+    cfg = core.load_config()
+    ef = dict(cfg.get("extra_forbidden") or {})
+    if on and start_min is not None and end_min is not None:
+        ef[str(job_id)] = {"start_min": int(start_min), "end_min": int(end_min),
+                           "label": str(label)}
+    else:
+        ef.pop(str(job_id), None)
+    cfg["extra_forbidden"] = ef
+    core.save_config(cfg)
+    return ef
 
 
 def time_in_backup_window(cfg, hhmm, inv=None):
@@ -601,7 +621,8 @@ def guest_view():
                     "blocked_no_backup": blocked})
     return {"settings": sett, "guests": out,
             "host": state.get(HOST_KEY), "host_update": host_update_settings(cfg),
-            "notify": notify_settings(cfg), "inventory": inv}
+            "notify": notify_settings(cfg), "extra_forbidden": cfg.get("extra_forbidden") or {},
+            "inventory": inv}
 
 
 if __name__ == "__main__":

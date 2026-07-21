@@ -72,14 +72,21 @@ def _atomic_write_json(path, data):
 
 
 def load_config():
+    # Preserve every key on disk (notify, extra_forbidden, …); only normalise the
+    # well-known ones. Returning a fixed subset here silently dropped panel settings.
     cfg = _read_json(CONFIG_PATH, {})
+    if not isinstance(cfg, dict):
+        cfg = {}
     settings = dict(DEFAULT_SETTINGS)
     settings.update(cfg.get("settings", {}))
     auth = dict(DEFAULT_AUTH)
     auth.update(cfg.get("auth", {}))
-    return {"settings": settings, "guests": cfg.get("guests", {}), "auth": auth,
-            "host_update": cfg.get("host_update", {}),
-            "maintenance": cfg.get("maintenance", {})}
+    cfg["settings"] = settings
+    cfg["auth"] = auth
+    cfg.setdefault("guests", {})
+    cfg.setdefault("host_update", {})
+    cfg.setdefault("maintenance", {})
+    return cfg
 
 
 def save_config(cfg):

@@ -702,6 +702,104 @@ def backup_coverage(storages):
     return cov
 
 
+# ---- host maintenance scan (read-only situational awareness) ------------------
+# Other scheduled work on the host competes for disk IO with LXC updates (ZFS
+# scrub/trim, mdadm check, e2scrub, fstrim, unattended apt, offsite backups, cron).
+# We only INFORM; the planner ignores these unless the user promotes one to a
+# forbidden zone in the panel.
+_JOB_CLASS = [
+    (r"mdcheck|checkarray",                          "RAID check (mdadm)",        "heavy"),
+    (r"zfs.*scrub|/scrub\b|zpool.*scrub",            "ZFS scrub",                 "heavy"),
+    (r"zfs.*trim|/trim\b|zpool.*trim",               "ZFS trim",                  "medium"),
+    (r"e2scrub",                                     "ext4 scrub (e2scrub)",      "medium"),
+    (r"fstrim",                                      "fstrim (SSD TRIM)",         "medium"),
+    (r"offsite|rsync",                               "offsite backup",            "heavy"),
+    (r"proxmox-backup|garbage|verify|prune|\bpbs",   "PBS job",                   "heavy"),
+    (r"apt-daily-upgrade|unattended",                "host apt upgrades",         "medium"),
+    (r"config-backup",                               "PVE config backup",         "light"),
+    (r"apt-daily\b",                                 "apt metadata refresh",      "light"),
+    (r"pve-daily-update",                            "PVE update check",          "light"),
+    (r"certbot|acme|letsencrypt",                    "cert renewal",              "light"),
+    (r"logrotate|man-db|tmpfiles|dpkg-db-backup|mdmonitor|motd|beszel|update-notifier|run-parts",
+                                                     "",                          "light"),
+]
+
+
+def _classify_job(text):
+    t = text.lower()
+    for rx, name, io in _JOB_CLASS:
+        if re.search(rx, t):
+            return (name or None), io
+    return None, "light"
+
+
+def _hhmm_of(s):
+    m = re.search(r"\b(\d{1,2}):(\d{2})(?::\d{2})?\b", s)
+    return (int(m.group(1)) * 60 + int(m.group(2))) if m else None
+
+
+def scan_host_jobs():
+    """Read-only list of scheduled host maintenance (systemd timers + cron),
+    classified by disk-IO weight. Heavy/medium items returned individually;
+    trivial ones only counted. INFORM-ONLY."""
+    seen, jobs, light = set(), [], 0
+
+    def add(key, name, io, start_min, sched, source, approx):
+        nonlocal light
+        if key in seen:
+            return
+        seen.add(key)
+        if io == "light":
+            light += 1
+            return
+        jobs.append({"id": key, "name": name, "io": io, "start_min": start_min,
+                     "sched": sched, "source": source, "approx": approx})
+
+    # systemd timers: NEXT time-of-day + unit
+    for ln in _sh(["systemctl", "list-timers", "--all", "--no-pager"], 15).splitlines():
+        mu = re.search(r"(\S+)\.timer\b", ln)
+        if not mu or mu.group(1).startswith("proxmox-adminupdater"):
+            continue
+        unit = mu.group(1)
+        name, io = _classify_job(unit)
+        start = _hhmm_of(ln)
+        sched = (f"{start // 60:02d}:{start % 60:02d}" if start is not None else unit)
+        add("timer:" + unit, name or unit, io, start, sched, "timer", start is None)
+
+    # cron: /etc/crontab + /etc/cron.d/* + root crontab
+    srcs, lines = ["/etc/crontab"], []
+    try:
+        srcs += [os.path.join("/etc/cron.d", f) for f in sorted(os.listdir("/etc/cron.d"))]
+    except OSError:
+        pass
+    for pth in srcs:
+        try:
+            lines += [(os.path.basename(pth), l) for l in open(pth).read().splitlines()]
+        except OSError:
+            pass
+    lines += [("root", l) for l in _sh(["crontab", "-l"], 10).splitlines()]
+    for src, l in lines:
+        l = l.strip()
+        f = l.split()
+        if len(f) < 6 or not re.match(r"^[\d*/,\-]+$", f[0]) or not re.match(r"^[\d*/,\-]+$", f[1]):
+            continue                                   # skips comments, VAR= and non-cron lines
+        mn, hr, dom, dow = f[0], f[1], f[2], f[4]
+        system = src != "root"                          # system crontabs carry a user field
+        cmd = " ".join(f[6:]) if (system and len(f) > 6) else " ".join(f[5:])
+        if re.search(r"vzdump", cmd + " " + src):       # already shown as the backup window
+            continue
+        name, io = _classify_job(cmd + " " + src)
+        start = int(hr) * 60 + int(mn) if re.match(r"^\d+$", hr) and re.match(r"^\d+$", mn) else None
+        freq = "daily" if (dom == "*" and dow == "*") else ("monthly" if dom != "*" else "weekly")
+        sched = freq + (f" {start // 60:02d}:{start % 60:02d}" if start is not None else "")
+        approx = freq != "daily" or start is None
+        add("cron:" + src + ":" + hr + ":" + mn + ":" + (cmd[:80] or l[:40]),
+            name or (cmd.split()[0][:22] if cmd else src), io, start, sched, "cron", approx)
+
+    jobs.sort(key=lambda j: (j["start_min"] is None, j["start_min"] or 0))
+    return {"jobs": jobs, "light_count": light}
+
+
 def build_inventory():
     """Read-only fleet scan. Windows are LEARNED: start from the job schedule,
     end from the latest actual backup completion among the job's guests (+15 min)."""
@@ -732,7 +830,7 @@ def build_inventory():
     return {"checked": datetime.now(timezone.utc).isoformat(),
             "jobs": [{"id": j["id"], "schedule": j.get("schedule"),
                       "storage": j.get("storage"), "vmids": j.get("vmids", [])} for j in jobs],
-            "windows": windows, "guests": guests}
+            "windows": windows, "guests": guests, "host_jobs": scan_host_jobs()}
 
 
 def scan_ok(inv):
