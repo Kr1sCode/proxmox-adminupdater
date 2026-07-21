@@ -211,6 +211,18 @@
   input[type=text],input[type=number],select{padding:.45rem;border:1px solid var(--border);border-radius:6px;
         background:var(--surface-2);color:inherit;font:inherit;width:100%}
   input[type=checkbox]{accent-color:var(--accent)}
+  .daypick{display:flex;gap:6px;flex-wrap:wrap;margin:.3rem 0 .2rem}
+  .dchip{display:inline-flex;gap:6px;align-items:center;font-family:var(--mono);font-size:12px;padding:5px 10px;border:1px solid var(--border);border-radius:99px;cursor:pointer;user-select:none}
+  .dchip:has(input:checked){border-color:var(--accent);background:var(--surface-2);color:var(--ink)}
+  .dchip input{margin:0}
+  .nightgrp{margin-top:10px}
+  .nighthd{font-size:12.5px;margin-bottom:3px}
+  .capbar{margin-bottom:6px}
+  .daytabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+  .daytab{font-family:var(--mono);font-size:12px;padding:5px 11px;border:1px solid var(--border);border-radius:99px;cursor:pointer;color:var(--ink-dim);display:inline-flex;gap:6px;align-items:center}
+  .daytab:hover{border-color:var(--accent)}
+  .daytab.on{border-color:var(--accent);background:var(--surface-2);color:var(--ink);font-weight:600}
+  .daytab .cnt{color:var(--ink-mute);font-size:11px}.daytab.on .cnt{color:var(--accent)}
 
   /* wizard: wide + fixed height so it never re-centres between steps, single scroll */
   #wiz{max-width:min(1040px,92vw);width:90vw}
@@ -269,6 +281,7 @@
     <div class="kpis" id="kpis"></div>
 
     <div class="sec"><h2 data-i18n="ribbonTitle">Service window</h2><span class="hint" id="ribbonHint"></span></div>
+    <div class="daytabs" id="ganttDays"></div>
     <div class="gantt">
       <div class="gantt-axis" id="ganttAxis"></div>
       <div class="gantt-rows" id="ganttRows"></div>
@@ -435,11 +448,12 @@
       <div><label data-i18n="winStart">Window start (HH:MM)</label><input type="text" id="mStart" value="01:30"></div>
       <div><label data-i18n="winEnd">Window end (HH:MM)</label><input type="text" id="mEnd" value="05:00"></div>
     </div>
+    <label data-i18n="maintDays">Nights of the week (the fleet is spread across them)</label>
+    <div id="mDays" class="daypick"></div>
     <div class="grid2">
-      <div><label data-i18n="maintDay">Day (0=Mon…6=Sun)</label><input type="number" id="mDay" min="0" max="6" value="6"></div>
       <div><label data-i18n="spacing">Spacing (min)</label><input type="number" id="mSpace" min="1" value="20"></div>
+      <div><label data-i18n="concurrency">Max concurrent / night</label><input type="number" id="mConc" min="1" value="1"></div>
     </div>
-    <label data-i18n="concurrency">Max concurrent updates</label><input type="number" id="mConc" min="1" value="1">
     <div style="display:flex;gap:.5rem;margin-top:.9rem;align-items:center">
       <button class="btn primary" id="mPropose" data-i18n="propose">Propose</button>
       <span class="sp"></span>
@@ -502,7 +516,7 @@ const ICONS={
 };
 function ic(name,cls){return `<svg class="ic ${cls||''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]||''}</svg>`;}
 function bootIcons(root){(root||document).querySelectorAll('[data-ic]').forEach(n=>{n.innerHTML=ic(n.dataset.ic,n.dataset.icCls||'');});}
-let SET={},HU={},DATA={guests:[]};
+let SET={},HU={},DATA={guests:[]},GDAY=null;
 
 // ---------- i18n ----------
 const I18N={
@@ -548,7 +562,8 @@ const I18N={
     queuedN:'Queued jobs:',nothingQueued:'Nothing to queue.',
     collideMsg:'falls inside the backup window',forceQ:'Save anyway?',
     maintTitle:'Maintenance window & schedule',maintNote:'Places enrolled containers into spaced slots inside the window, skipping every detected backup window and the host-update slot.',
-    winStart:'Window start (HH:MM)',winEnd:'Window end (HH:MM)',maintDay:'Day (0=Mon…6=Sun)',spacing:'Spacing (min)',concurrency:'Max concurrent updates',
+    winStart:'Window start (HH:MM)',winEnd:'Window end (HH:MM)',maintDay:'Day (0=Mon…6=Sun)',maintDays:'Nights of the week (fleet spread across them)',spacing:'Spacing (min)',concurrency:'Max concurrent / night',
+    capLine:'{p}/{r} placed · {s} slots/week across {n} nights',
     propose:'Propose',applyPlan:'Apply schedule',planPreview:'Proposed schedule',forbiddenZones:'Blocked windows (backups/host)',
     unplaceableLbl:'No slot (window too small)',noFresh:'No containers with a fresh backup to schedule.',placedWord:'placed',appliedN:'Schedule applied to',
     footNote:'State colours (green/amber/red) carry meaning; azure accent is navigation only. Notifications: aggregate HTML report after each window + a separate alert only on rollback.',
@@ -621,7 +636,8 @@ const I18N={
     queuedN:'Zakolejkowano zadań:',nothingQueued:'Nic do zakolejkowania.',
     collideMsg:'wpada w okno backupu',forceQ:'Zapisać mimo to?',
     maintTitle:'Okno serwisowe i harmonogram',maintNote:'Rozmieszcza włączone kontenery w odstępach wewnątrz okna, omijając każde wykryte okno backupu i slot aktualizacji hosta.',
-    winStart:'Początek okna (HH:MM)',winEnd:'Koniec okna (HH:MM)',maintDay:'Dzień (0=Pn…6=Nd)',spacing:'Odstęp (min)',concurrency:'Maks. równoległych aktualizacji',
+    winStart:'Początek okna (HH:MM)',winEnd:'Koniec okna (HH:MM)',maintDay:'Dzień (0=Pn…6=Nd)',maintDays:'Noce tygodnia (flota rozłożona po nich)',spacing:'Odstęp (min)',concurrency:'Maks. równoległych / noc',
+    capLine:'{p}/{r} rozmieszczono · {s} slotów/tydzień w {n} nocach',
     propose:'Zaproponuj',applyPlan:'Zastosuj harmonogram',planPreview:'Proponowany harmonogram',forbiddenZones:'Okna zablokowane (backupy/host)',
     unplaceableLbl:'Brak miejsca (okno za małe)',noFresh:'Brak kontenerów ze świeżą kopią do zaplanowania.',placedWord:'rozmieszczono',appliedN:'Harmonogram zastosowany do',
     footNote:'Kolory stanu (zielony/bursztyn/czerwony) niosą znaczenie; akcent (azur) to tylko nawigacja. Powiadomienia: zbiorczy raport HTML po każdym oknie + osobny alert tylko przy rollbacku.',
@@ -767,15 +783,28 @@ function renderGantt(d){
   const grid=ticks.map(m=>`<i style="left:${ribPct(m)}%"></i>`).join('');
   el('ribbonHint').textContent=(inv.windows&&inv.windows.length)?t('ribbonHint'):'— '+t('noWindows');
 
-  // backup windows drawn as faint full-height bands inside EVERY track (aligned columns)
+  // --- week view: pick which night to show (chips = per-night machine counts) ---
+  const gwd=x=>(x.config.weekdays&&x.config.weekdays.length)?(x.config.weekdays[0]%7):6;
+  const dayCount={};
+  for(const x of d.guests){if(x.config.enabled&&x.config.mode==='calendar')dayCount[gwd(x)]=(dayCount[gwd(x)]||0)+1;}
+  let presentDays=Object.keys(dayCount).map(Number).sort((a,b)=>a-b);
+  if(!presentDays.length)presentDays=((d.maintenance||{}).days||[6]).slice().sort((a,b)=>a-b);
+  if(GDAY===null||!presentDays.includes(GDAY))
+    GDAY=presentDays.reduce((a,b)=>((dayCount[b]||0)>(dayCount[a]||0)?b:a),presentDays[0]);
+  el('ganttDays').innerHTML=presentDays.map(dd=>`<div class="daytab${dd===GDAY?' on':''}" data-d="${dd}">${wd(dd)} <span class="cnt">${dayCount[dd]||0}</span></div>`).join('');
+  el('ganttDays').querySelectorAll('.daytab').forEach(tb=>tb.onclick=()=>{GDAY=+tb.dataset.d;renderGantt(DATA);});
+
+  // host update runs only on its own weekday(s); is it the night we're viewing?
+  const HUwd=(HU.weekdays&&HU.weekdays.length)?HU.weekdays.map(w=>w%7):[];
   const hostM=(HU.enabled&&HU.mode==='calendar')?hhmmToMin((HU.times||['02:00'])[0]):null;
+  const hostToday=(hostM!=null)&&(!HUwd.length||HUwd.includes(GDAY));
   // faint aligned columns drawn in EVERY row: the two anchors to avoid — each
   // detected backup window (red) and the host-update slot (amber).
   let bands=(inv.windows||[]).filter(w=>inAxis(w.start_min)||inAxis(w.end_min)).map(w=>{
     const l=ribPct(w.start_min), width=Math.max(1.5,Math.min(mPct((((w.end_min-w.start_min)%1440)+1440)%1440),100-l));
     return `<div class="gband backup" style="left:${l}%;width:${width}%"></div>`;
   }).join('');
-  if(hostM!=null&&inAxis(hostM))bands+=`<div class="gband hostzone" style="left:${ribPct(hostM)}%;width:${Math.max(3,mPct(30))}%"></div>`;
+  if(hostToday&&inAxis(hostM))bands+=`<div class="gband hostzone" style="left:${ribPct(hostM)}%;width:${Math.max(3,mPct(30))}%"></div>`;
   const EF=d.extra_forbidden||{};
   for(const k in EF){const z=EF[k];if(z&&z.start_min!=null&&inAxis(z.start_min))
     bands+=`<div class="gband maintzone" style="left:${ribPct(z.start_min)}%;width:${Math.max(2,mPct((((z.end_min-z.start_min)%1440)+1440)%1440))}%"></div>`;}
@@ -794,7 +823,7 @@ function renderGantt(d){
             :`<span class="gempty">${t('ganttNoSched')}</span>`)+`</div>`;
 
   // --- host maintenance rows (read-only) — other scheduled disk-IO on the host ---
-  const hj=((inv.host_jobs&&inv.host_jobs.jobs)||[]).filter(j=>j.start_min!=null&&inAxis(j.start_min))
+  const hj=((inv.host_jobs&&inv.host_jobs.jobs)||[]).filter(j=>j.start_min!=null&&inAxis(j.start_min)&&(j.wd==null||j.wd===GDAY))
     .sort((a,b)=>ribNorm(a.start_min)-ribNorm(b.start_min));
   for(const j of hj){
     const promoted=!!EF[j.id], iocls=j.io==='heavy'?'crit':'warn', dur=j.io==='heavy'?90:45;
@@ -811,14 +840,14 @@ function renderGantt(d){
   const inZone=m=>{
     for(const w of (inv.windows||[])){const s=+w.start_min,e=+w.end_min;
       if((s<=e)?(s<=m&&m<e):(m>=s||m<e))return 'backup';}
-    if(hostM!=null){const s=hostM,e=(hostM+30)%1440;
+    if(hostToday){const s=hostM,e=(hostM+30)%1440;
       if((s<=e)?(s<=m&&m<e):(m>=s||m<e))return 'host';}
     for(const k in EF){const z=EF[k];const s=+z.start_min,e=+z.end_min;
       if((s<=e)?(s<=m&&m<e):(m>=s||m<e))return 'maint';}
     return null;
   };
   // --- one row per enabled LXC ---
-  const gs=d.guests.filter(x=>x.config.enabled&&x.config.mode==='calendar'&&hhmmToMin((x.config.times||[])[0])!=null)
+  const gs=d.guests.filter(x=>x.config.enabled&&x.config.mode==='calendar'&&hhmmToMin((x.config.times||[])[0])!=null&&gwd(x)===GDAY)
     .map(x=>{const c=x.config;const sn=(c.snapshot&&c.snapshot.enabled&&c.snapshot.mode==='calendar')?hhmmToMin((c.snapshot.times||[])[0]):null;
              return {name:x.name,vmid:x.vmid,m:hhmmToMin(c.times[0]),wds:c.weekdays||[],keep:c.keep,snap:sn};})
     .sort((a,b)=>ribNorm(a.m)-ribNorm(b.m));
@@ -950,31 +979,51 @@ el('hSave').onclick=async()=>{
   el('hdlg').close();load();};
 el('hostbar').onclick=openHost;
 
+// ---------- weekly day-picker ----------
+function fillDayPick(id,sel){
+  el(id).innerHTML=[0,1,2,3,4,5,6].map(d=>
+    `<label class="dchip"><input type="checkbox" data-d="${d}" ${(sel||[]).includes(d)?'checked':''}>${wd(d)}</label>`).join('');
+}
+function readDayPick(id){return [...el(id).querySelectorAll('input[data-d]')].filter(c=>c.checked).map(c=>+c.dataset.d);}
+
 // ---------- planner dialog ----------
 let PLAN=null;
-el('proposeBtn').onclick=()=>{el('mApply').disabled=true;el('mPreview').innerHTML='';PLAN=null;el('sdlg').showModal();};
+el('proposeBtn').onclick=()=>{
+  const m=DATA.maintenance||{};
+  el('mStart').value=m.window_start||'01:30';el('mEnd').value=m.window_end||'05:00';
+  el('mSpace').value=m.spacing_min||20;el('mConc').value=m.concurrency||1;
+  fillDayPick('mDays',m.days||[6]);
+  el('mApply').disabled=true;el('mPreview').innerHTML='';PLAN=null;el('sdlg').showModal();};
 async function doPropose(vmids){
+  let days=readDayPick('mDays'); if(!days.length)days=[6];
   await fetch('/api/maintenance',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({window_start:el('mStart').value.trim(),window_end:el('mEnd').value.trim(),
-      weekdays:[Math.max(0,Math.min(6,+el('mDay').value||6))],
-      spacing_min:Math.max(1,+el('mSpace').value||20),concurrency:Math.max(1,+el('mConc').value||1)})});
+      days,spacing_min:Math.max(1,+el('mSpace').value||20),concurrency:Math.max(1,+el('mConc').value||1)})});
   const q=(vmids&&vmids.length)?('?vmids='+vmids.join(',')):'';
   PLAN=await fetch('/api/schedule/propose'+q).then(r=>r.json());return PLAN;
 }
 el('mPropose').onclick=async()=>{renderPlan(await doPropose(),el('mPreview'),el('mApply'));};
 function renderPlan(p,box,applyBtn){
-  if(!p.plan.length){box.innerHTML=`<p class="muted">${t('noFresh')}</p>`;if(applyBtn)applyBtn.disabled=true;return;}
-  const zones=(p.forbidden||[]).map(z=>`${z.start}–${z.end}`).join(', ')||'—';
-  const rows=p.plan.map(it=>`<div class="r"><span>${it.name||''} <span class="muted mono">${it.vmid}</span></span><b class="mono">${it.time}</b></div>`).join('');
-  const un=(p.unplaceable||[]).length?`<p class="note" style="color:var(--crit)">${t('unplaceableLbl')}: ${p.unplaceable.join(', ')}</p>`:'';
-  box.innerHTML=`<b>${t('planPreview')}</b> <span class="muted">(${p.capacity.placed} ${t('placedWord')})</span>
-    <div class="covlist" style="margin-top:.4rem">${rows}</div>
-    <p class="note">${t('forbiddenZones')}: ${zones}</p>${un}`;
+  const cap=p.capacity||{};
+  if(!p.plan||!p.plan.length){box.innerHTML=`<p class="muted">${t('noFresh')}</p>`;if(applyBtn)applyBtn.disabled=true;return;}
+  // capacity meter
+  const util=cap.slots_per_week?Math.round(cap.placed/cap.slots_per_week*100):0;
+  let html=`<div class="capbar"><b>${t('planPreview')}</b> <span class="muted">${t('capLine',{p:cap.placed,r:cap.requested,s:cap.slots_per_week,n:cap.nights})}</span>
+    <div class="cover" style="margin-top:5px"><i style="width:${Math.min(100,util)}%;background:${util>85?'var(--crit)':'var(--good)'}"></i></div></div>`;
+  // grouped by night
+  for(const pd of (p.per_day||[])){
+    if(!pd.items.length)continue;
+    const zt=(pd.forbidden||[]).map(z=>`${z.start}–${z.end}`).join(', ')||'—';
+    html+=`<div class="nightgrp"><div class="nighthd"><b>${wd(pd.weekday)}</b> <span class="muted">${pd.items.length}/${pd.cap} · ${t('forbiddenZones')}: ${zt}</span></div>
+      <div class="covlist">${pd.items.map(it=>`<div class="r"><span>${it.name||''} <span class="muted mono">${it.vmid}</span></span><b class="mono">${it.time}</b></div>`).join('')}</div></div>`;
+  }
+  if((p.unplaceable||[]).length)html+=`<p class="note" style="color:var(--crit)">${t('unplaceableLbl')}: ${p.unplaceable.join(', ')}</p>`;
+  box.innerHTML=html;
   if(applyBtn)applyBtn.disabled=false;
 }
 async function applyPlan(p){
   const d=await fetch('/api/schedule/apply',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({plan:p.plan,weekday:p.weekday})}).then(r=>r.json());
+    body:JSON.stringify({plan:p.plan})}).then(r=>r.json());   // each item carries its own weekday
   return (d.applied||[]).length;
 }
 el('mApply').onclick=async()=>{if(!PLAN||!PLAN.plan.length)return;const n=await applyPlan(PLAN);
@@ -1195,17 +1244,19 @@ function renderWiz(){
         <p class="note" style="margin-bottom:0">${t('wizHostNote')}</p>
       </div>
       <label style="margin-top:.8rem">${t('wizLxcWindow')}</label>
-      <div class="grid2"><div><label class="thin" data-i18n="winStart">${t('winStart')}</label><input type="text" id="wStart" value="${el('mStart').value||'01:30'}"></div>
-      <div><label class="thin" data-i18n="winEnd">${t('winEnd')}</label><input type="text" id="wEnd" value="${el('mEnd').value||'05:00'}"></div></div>
-      <div class="grid2"><div><label class="thin">${t('maintDay')}</label><input type="number" id="wDay" min="0" max="6" value="${el('mDay').value||6}"></div>
-      <div><label class="thin">${t('spacing')}</label><input type="number" id="wSpace" min="1" value="${el('mSpace').value||20}"></div></div>
+      <div class="grid2"><div><label class="thin" data-i18n="winStart">${t('winStart')}</label><input type="text" id="wStart" value="${(DATA.maintenance||{}).window_start||'01:30'}"></div>
+      <div><label class="thin" data-i18n="winEnd">${t('winEnd')}</label><input type="text" id="wEnd" value="${(DATA.maintenance||{}).window_end||'05:00'}"></div></div>
+      <label class="thin">${t('maintDays')}</label><div id="wDays" class="daypick"></div>
+      <div><label class="thin">${t('spacing')}</label><input type="number" id="wSpace" min="1" value="${(DATA.maintenance||{}).spacing_min||20}" style="max-width:120px"></div>
       <div style="display:flex;gap:.5rem;margin-top:.8rem"><button class="btn primary" id="wPropose">${t('propose')}</button></div>
       <div id="wPreview" style="margin-top:.8rem"></div>`;
     el('wHostEn').checked=!!HU.enabled;
     el('wHostTime').value=(HU.times||['02:00'])[0];
     el('wHostDay').value=(HU.weekdays&&HU.weekdays.length)?HU.weekdays[0]:5;
+    fillDayPick('wDays',(DATA.maintenance||{}).days||[6]);
     el('wPropose').onclick=async()=>{
-      el('mStart').value=el('wStart').value;el('mEnd').value=el('wEnd').value;el('mDay').value=el('wDay').value;el('mSpace').value=el('wSpace').value;
+      el('mStart').value=el('wStart').value;el('mEnd').value=el('wEnd').value;el('mSpace').value=el('wSpace').value;
+      fillDayPick('mDays',readDayPick('wDays'));
       await applyWizHost();
       renderPlan(await doPropose([...(WSEL||[])]),el('wPreview'),null);};
     if(PLAN)renderPlan(PLAN,el('wPreview'),null);
@@ -1238,7 +1289,7 @@ async function wizFinish(){
   for(const it of PLAN.plan){
     const g=(DATA.guests||[]).find(x=>x.vmid===it.vmid);const cur=g?g.config:{};
     await fetch('/api/guests/'+it.vmid,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({...cur,enabled:true,mode:'calendar',times:[it.time],weekdays:[PLAN.weekday],
+      body:JSON.stringify({...cur,enabled:true,mode:'calendar',times:[it.time],weekdays:[it.weekday],
         security_patch:WSCOPE.sec,app_update:WSCOPE.app==='auto'?'auto':null,pre_snapshot:true,
         auto_reboot:WSCOPE.reboot,
         health_check:{type:WSCOPE.hc,arg:(cur.health_check||{}).arg||''},force:true})});

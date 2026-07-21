@@ -310,9 +310,10 @@ def enqueue_actions(action, vmids):
     return enqueue(jobs), skipped
 
 
-def apply_schedule(plan, weekday):
-    """Write a proposed schedule back into guest configs: calendar mode, the
-    assigned time, the maintenance weekday, update enabled. Idempotent per guest."""
+def apply_schedule(plan, weekday=None):
+    """Write a proposed schedule back into guest configs: calendar mode, the assigned
+    time, and its OWN weekday (the weekly planner gives each guest a night). Falls
+    back to the passed weekday for legacy callers. Idempotent per guest."""
     cfg = core.load_config()
     applied = []
     for item in plan or []:
@@ -320,12 +321,13 @@ def apply_schedule(plan, weekday):
         tm = str(item.get("time", "")).strip()
         if not _hhmm(tm):
             continue
+        wd = item.get("weekday", weekday if weekday is not None else 6)
         g = dict(GUEST_DEFAULTS)
         g.update(cfg.get("guests", {}).get(vmid, {}))
         g["enabled"] = True
         g["mode"] = "calendar"
         g["times"] = [tm]
-        g["weekdays"] = [int(weekday)]
+        g["weekdays"] = [int(wd) % 7]
         cfg.setdefault("guests", {})[vmid] = g
         applied.append(int(vmid))
     if applied:
@@ -336,9 +338,11 @@ def apply_schedule(plan, weekday):
 def save_maintenance(patch):
     cfg = core.load_config()
     m = maintenance_settings(cfg)
-    for k in MAINTENANCE_DEFAULTS:
+    for k in ("window_start", "window_end", "days", "spacing_min", "concurrency"):
         if k in patch:
             m[k] = patch[k]
+    m["days"] = sorted({int(d) % 7 for d in (m.get("days") or [6])}) or [6]
+    m.pop("weekdays", None)   # drop the migrated legacy field
     cfg["maintenance"] = m
     core.save_config(cfg)
     return m
@@ -374,17 +378,22 @@ def guest_backup_fresh(vmid, inv, fresh_hours, now_ts):
 
 # ---- intelligent service-window planner --------------------------------------
 MAINTENANCE_DEFAULTS = {
-    "window_start": "01:30",   # updates may run from here...
+    "window_start": "01:30",   # nightly window: updates may run from here...
     "window_end": "05:00",     # ...to here
-    "weekdays": [6],           # Sunday (Mon=0..Sun=6)
+    "days": [6],               # weekdays AVAILABLE for updates (Mon=0..Sun=6) — the fleet
+                               # is spread across these nights, not crammed into one
     "spacing_min": 20,         # gap between two guests (HDD: serialize)
-    "concurrency": 1,          # max guests updating at once (HDD default 1)
+    "concurrency": 1,          # max guests updating at once per night (HDD default 1)
 }
 
 
 def maintenance_settings(cfg):
     m = dict(MAINTENANCE_DEFAULTS)
-    m.update(cfg.get("maintenance") or {})
+    src = cfg.get("maintenance") or {}
+    m.update(src)
+    if "days" not in src and "weekdays" in src:   # migrate the old single-day field
+        m["days"] = src["weekdays"]
+    m["days"] = sorted({int(d) % 7 for d in (m.get("days") or [6])}) or [6]
     return m
 
 
@@ -401,24 +410,44 @@ def _in_zone(minute, zones):
     return None
 
 
-def forbidden_zones(cfg, inv, weekday):
-    """Minute ranges where NOTHING may be scheduled: every detected backup window
-    (daily, PBS + built-in vzdump alike) + the host-update slot. The host update
-    is treated as an anchor to avoid REGARDLESS of its weekday — even if the host
-    updates on a different day than the LXC window, we keep that clock slot clear
-    so the two never line up (the user's second pillar next to the backup)."""
+def forbidden_zones(cfg, inv, weekday=None):
+    """Everyday hard zones: every detected backup window (daily) + host-maintenance
+    zones the user promoted to 'avoid'. Day-specific blockers (host update, detected
+    host-maintenance jobs) are added on top by day_zones()."""
     zones = [(int(w["start_min"]), int(w["end_min"])) for w in inv.get("windows", [])]
-    hu = host_update_settings(cfg)
-    if hu.get("enabled") and hu.get("mode") == "calendar":
-        hs = _hhmm((hu.get("times") or ["02:00"])[0])
-        if hs is not None:
-            zones.append((hs, (hs + 30) % 1440))
-    # host-maintenance jobs the user promoted to "avoid" (ZFS scrub, mdadm check…)
     for z in (cfg.get("extra_forbidden") or {}).values():
         try:
             zones.append((int(z["start_min"]), int(z["end_min"])))
         except (KeyError, TypeError, ValueError):
             pass
+    return zones
+
+
+def _job_dur(io):
+    return 90 if io == "heavy" else 45
+
+
+def day_zones(cfg, inv, weekday):
+    """ALL blockers to avoid on a given weekday: the everyday zones (backups +
+    promoted) + the host update on its own weekday + every detected host-maintenance
+    job (heavy AND medium — red/amber) that runs that day. The weekly planner uses
+    this so each night dodges exactly that night's real disk-IO."""
+    zones = list(forbidden_zones(cfg, inv, weekday))
+    hu = host_update_settings(cfg)
+    if hu.get("enabled") and hu.get("mode") == "calendar":
+        hwds = hu.get("weekdays") or list(range(7))
+        if weekday in hwds:
+            hs = _hhmm((hu.get("times") or ["02:00"])[0])
+            if hs is not None:
+                zones.append((hs, (hs + 30) % 1440))
+    for j in ((inv.get("host_jobs") or {}).get("jobs") or []):
+        sm = j.get("start_min")
+        if sm is None:
+            continue
+        wd = j.get("wd")
+        if wd is not None and int(wd) != weekday:   # runs on another weekday
+            continue
+        zones.append((int(sm), (int(sm) + _job_dur(j.get("io"))) % 1440))
     return zones
 
 
@@ -450,54 +479,95 @@ def time_in_backup_window(cfg, hhmm, inv=None):
     return None
 
 
+def _place_one(lanes, ws, we, conc, spacing, zones):
+    """Place ONE item into the earliest free lane of a night; return its minute or
+    None if the night is full. Mutates lanes."""
+    for _ in range(conc):
+        li = min(range(conc), key=lambda i: lanes[i])   # earliest-free lane
+        cur = lanes[li]
+        z = _in_zone(cur, zones)
+        while z and cur < we:                            # jump past forbidden zones
+            cur = z[1]
+            z = _in_zone(cur, zones)
+        if cur is not None and cur < we and not _in_zone(cur, zones):
+            lanes[li] = cur + spacing
+            return cur
+        lanes[li] = we                                   # this lane is full
+    return None
+
+
+def _night_capacity(ws, we, conc, spacing, zones):
+    """How many placements fit in one night (used for ranking + the capacity meter)."""
+    lanes, n = [ws] * conc, 0
+    while n < 1000:
+        if _place_one(lanes, ws, we, conc, spacing, zones) is None:
+            break
+        n += 1
+    return n
+
+
 def propose_schedule(cfg, vmids=None):
-    """Place enrolled guests into conflict-free slots inside the maintenance
-    window, skipping every forbidden zone, spaced out, honouring concurrency."""
+    """WEEKLY planner: spread enrolled guests across the chosen nights of the week,
+    preferring the QUIETEST nights (fewest host-maintenance blockers), each guest in
+    a conflict-free spaced slot that dodges that night's real zones."""
     inv = get_inventory()
     m = maintenance_settings(cfg)
     ws, we = _hhmm(m["window_start"]), _hhmm(m["window_end"])
     spacing = max(1, int(m["spacing_min"]))
     conc = max(1, int(m["concurrency"]))
-    weekday = (m["weekdays"] or [6])[0]
-    zones = forbidden_zones(cfg, inv, weekday)
+    days = m["days"] or [6]
+    fmt = lambda mn: f"{(mn // 60) % 24:02d}:{mn % 60:02d}"
+    names = inv.get("guests") or {}
 
     if vmids is None:  # default: every LXC with a fresh backup
         now = int(time.time())
         fh = int(cfg["settings"].get("backup_fresh_hours", 24))
-        vmids = sorted((v for v in (inv.get("guests") or {})
-                        if guest_backup_fresh(v, inv, fh, now)), key=int)
+        vmids = sorted((v for v in names if guest_backup_fresh(v, inv, fh, now)), key=int)
     vmids = [str(v) for v in vmids]
 
-    lanes = [ws] * conc
-    assign, unplaceable = {}, []
-    for v in vmids:
+    if ws is None or we is None or we <= ws:
+        return {"maintenance": m, "days": days, "plan": [], "per_day": [],
+                "unplaceable": [int(v) for v in vmids],
+                "capacity": {"slots_per_week": 0, "requested": len(vmids), "placed": 0}}
+
+    # one lane-set + zone-set per available night, with its free capacity
+    nights = []
+    for d in days:
+        z = day_zones(cfg, inv, d)
+        nights.append({"weekday": d, "zones": z, "lanes": [ws] * conc,
+                       "cap": _night_capacity(ws, we, conc, spacing, z), "placed": []})
+    # quietest (most free) nights first
+    order = sorted(range(len(nights)), key=lambda i: -nights[i]["cap"])
+
+    assign, unplaceable, di = {}, [], 0
+    for v in vmids:                        # round-robin across nights, biased to quiet ones
         placed = False
-        for _ in range(conc):
-            li = min(range(conc), key=lambda i: lanes[i])   # earliest-free lane
-            cur = lanes[li]
-            z = _in_zone(cur, zones)
-            while z and cur < we:                            # jump past forbidden zones
-                cur = z[1]
-                z = _in_zone(cur, zones)
-            if cur is not None and cur < we and not _in_zone(cur, zones):
-                assign[v] = cur
-                lanes[li] = cur + spacing
+        for k in range(len(order)):
+            night = nights[order[(di + k) % len(order)]]
+            slot = _place_one(night["lanes"], ws, we, conc, spacing, night["zones"])
+            if slot is not None:
+                night["placed"].append(v)
+                assign[v] = (night["weekday"], slot)
+                di = (di + k + 1) % len(order)
                 placed = True
                 break
-            lanes[li] = we                                   # this lane is full
         if not placed:
             unplaceable.append(int(v))
 
-    names = inv.get("guests") or {}
-    fmt = lambda mn: f"{(mn // 60) % 24:02d}:{mn % 60:02d}"
-    plan = [{"vmid": int(v), "name": names.get(v, {}).get("name", ""), "time": fmt(assign[v])}
-            for v in sorted(assign, key=lambda x: assign[x])]
-    slots = -(-(we - ws) // spacing) if (we is not None and ws is not None and we > ws) else 0  # ceil
+    plan = [{"vmid": int(v), "name": names.get(v, {}).get("name", ""),
+             "weekday": assign[v][0], "time": fmt(assign[v][1])}
+            for v in sorted(assign, key=lambda x: (assign[x][0], assign[x][1]))]
+    per_day = [{"weekday": nt["weekday"], "cap": nt["cap"],
+                "forbidden": [{"start": fmt(s), "end": fmt(e)} for s, e in nt["zones"]],
+                "items": [{"vmid": int(v), "name": names.get(v, {}).get("name", ""),
+                           "time": fmt(assign[v][1])} for v in nt["placed"]]}
+               for nt in nights]
+    total = sum(nt["cap"] for nt in nights)
     return {
-        "maintenance": m, "weekday": weekday,
-        "forbidden": [{"start": fmt(s), "end": fmt(e)} for s, e in zones],
-        "plan": plan, "unplaceable": unplaceable,
-        "capacity": {"slots_estimate": slots, "requested": len(vmids), "placed": len(assign)},
+        "maintenance": m, "days": days, "plan": plan, "per_day": per_day,
+        "unplaceable": unplaceable,
+        "capacity": {"slots_per_week": total, "requested": len(vmids), "placed": len(assign),
+                     "nights": len(days)},
     }
 
 # Schedule for updating the PVE host itself. The ACTUAL command lives host-side
@@ -622,7 +692,7 @@ def guest_view():
     return {"settings": sett, "guests": out,
             "host": state.get(HOST_KEY), "host_update": host_update_settings(cfg),
             "notify": notify_settings(cfg), "extra_forbidden": cfg.get("extra_forbidden") or {},
-            "inventory": inv}
+            "maintenance": maintenance_settings(cfg), "inventory": inv}
 
 
 if __name__ == "__main__":

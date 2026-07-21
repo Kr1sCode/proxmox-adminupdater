@@ -744,7 +744,7 @@ def scan_host_jobs():
     trivial ones only counted. INFORM-ONLY."""
     seen, jobs, light = set(), [], 0
 
-    def add(key, name, io, start_min, sched, source, approx):
+    def add(key, name, io, start_min, sched, source, approx, wd=None):
         nonlocal light
         if key in seen:
             return
@@ -753,9 +753,9 @@ def scan_host_jobs():
             light += 1
             return
         jobs.append({"id": key, "name": name, "io": io, "start_min": start_min,
-                     "sched": sched, "source": source, "approx": approx})
+                     "sched": sched, "source": source, "approx": approx, "wd": wd})
 
-    # systemd timers: NEXT time-of-day + unit
+    # systemd timers: NEXT time-of-day + unit (weekday left unknown -> treated daily)
     for ln in _sh(["systemctl", "list-timers", "--all", "--no-pager"], 15).splitlines():
         mu = re.search(r"(\S+)\.timer\b", ln)
         if not mu or mu.group(1).startswith("proxmox-adminupdater"):
@@ -793,8 +793,18 @@ def scan_host_jobs():
         freq = "daily" if (dom == "*" and dow == "*") else ("monthly" if dom != "*" else "weekly")
         sched = freq + (f" {start // 60:02d}:{start % 60:02d}" if start is not None else "")
         approx = freq != "daily" or start is None
+        # weekday (Mon=0..Sun=6) when determinable: numeric cron dow, or a `date +%w -eq N`
+        # guard inside the command (the ZFS scrub/trim pattern). Else None = every night.
+        wd = None
+        mdow = re.match(r"^([0-7])$", dow)
+        if mdow:
+            wd = (int(mdow.group(1)) % 7 + 6) % 7      # cron 0/7=Sun,1=Mon -> Py Mon0..Sun6
+        else:
+            mw = re.search(r"date \+.?%w.?\s*-eq\s*([0-6])", cmd)
+            if mw:
+                wd = (int(mw.group(1)) + 6) % 7        # %w 0=Sun -> Py Sun=6
         add("cron:" + src + ":" + hr + ":" + mn + ":" + (cmd[:80] or l[:40]),
-            name or (cmd.split()[0][:22] if cmd else src), io, start, sched, "cron", approx)
+            name or (cmd.split()[0][:22] if cmd else src), io, start, sched, "cron", approx, wd)
 
     jobs.sort(key=lambda j: (j["start_min"] is None, j["start_min"] or 0))
     return {"jobs": jobs, "light_count": light}
