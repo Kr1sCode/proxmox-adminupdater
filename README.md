@@ -15,7 +15,10 @@ it reuses the same config/schedule/UI lineage.
 **Service window** — the mission-control view. The two schedule anchors (the daily
 backup window in red, the PVE host update in amber) are drawn across every row, and
 each LXC is laid out around them: a per-machine timeline showing the pre-update
-snapshot → update → prune, its time and retention. EN/PL and light/dark built in.
+snapshot → update → prune, its time and retention. It also surfaces **other
+scheduled host maintenance** that competes for disk IO — ZFS scrub/trim, mdadm
+check, e2scrub, fstrim, unattended apt, offsite backups — as read-only rows you can
+one-click "avoid". EN/PL and light/dark built in.
 
 ![Service window](docs/dashboard-service-window.png)
 
