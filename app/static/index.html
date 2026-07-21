@@ -110,16 +110,20 @@
 
   /* per-row schedule gantt */
   .gantt{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--r);padding:14px 16px 12px}
-  .grow{display:grid;grid-template-columns:172px 1fr;align-items:center;column-gap:12px}
-  .gantt-axis{margin-left:184px;display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--ink-mute);
-              border-bottom:1px solid var(--border-soft);padding-bottom:5px;margin-bottom:4px}
-  .gantt-rows{display:flex;flex-direction:column}
-  .grow{padding:5px 0;border-bottom:1px solid var(--border-soft)}
+  .grow{display:grid;grid-template-columns:196px 1fr;align-items:center;column-gap:12px}
+  .gantt-axis{position:relative;margin-left:208px;height:15px;font-family:var(--mono);font-size:10px;color:var(--ink-mute);
+              border-bottom:1px solid var(--border-soft);margin-bottom:4px}
+  .gantt-axis span{position:absolute;bottom:5px;white-space:nowrap}
+  .gantt-rows{position:relative;display:flex;flex-direction:column}
+  .ggrid{position:absolute;top:0;bottom:0;left:208px;right:0;pointer-events:none;z-index:0}
+  .ggrid i{position:absolute;top:0;bottom:0;border-left:1px dashed var(--ink-mute);opacity:.2}
+  .grow{padding:5px 0;border-bottom:1px solid var(--border-soft);position:relative;z-index:1}
   .grow:last-child{border-bottom:0}
   .grow.ref{background:linear-gradient(90deg,var(--surface-2),transparent 70%);border-radius:6px}
   .glabel{display:flex;align-items:baseline;gap:7px;font-size:12.5px;overflow:hidden;white-space:nowrap}
-  .glabel .nm{font-weight:600}.glabel .id{font-family:var(--mono);font-size:10px;color:var(--ink-mute)}
-  .glabel .day{font-family:var(--mono);font-size:10px;color:var(--ink-dim);margin-left:auto;padding-left:6px}
+  .glabel .nm{font-weight:600;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .glabel .id{font-family:var(--mono);font-size:10px;color:var(--ink-mute);flex:none}
+  .glabel .day{font-family:var(--mono);font-size:10px;color:var(--ink-dim);margin-left:auto;padding-left:8px;flex:none}
   .glabel.off .nm{color:var(--ink-mute);font-weight:500}
   .gtrack{position:relative;height:26px}
   .gband{position:absolute;top:0;bottom:0;border-radius:3px}
@@ -303,11 +307,19 @@
     <div class="logbar">
       <button class="btn ghost" id="logRefresh"><span data-ic="refresh"></span> <span data-i18n="refresh">Refresh</span></button>
       <label class="row" style="gap:.35rem;font-size:.85rem"><input type="checkbox" id="logAuto" checked> <span data-i18n="autoLbl">auto (5&nbsp;s)</span></label>
+      <input type="text" id="logSearch" data-i18n-ph="logFilterPh" placeholder="filter text…" style="width:auto;padding:.25rem .5rem;min-width:150px">
+      <select id="logCat" style="width:auto;padding:.25rem .4rem">
+        <option value="all" data-i18n="logCatAll">All events</option>
+        <option value="audit" data-i18n="logCatAudit">Audit (changes)</option>
+        <option value="task" data-i18n="logCatTask">Tasks</option>
+        <option value="error" data-i18n="logCatError">Errors / rollback</option>
+      </select>
       <label class="row" style="gap:.35rem;font-size:.85rem"><span data-i18n="linesLbl">lines</span>
         <select id="logLines" style="width:auto;padding:.2rem .4rem">
           <option value="100">100</option><option value="200" selected>200</option>
           <option value="500">500</option><option value="1000">1000</option><option value="2000">2000</option><option value="5000">5000</option>
         </select></label>
+      <button class="btn ghost" id="logCsv"><span data-ic="logs"></span> <span data-i18n="logCsv">Export CSV</span></button>
       <span class="sp"></span><span class="muted" id="logMeta"></span>
     </div>
     <div class="panel"><pre id="logbox">…</pre></div>
@@ -494,6 +506,7 @@ let SET={},HU={},DATA={guests:[]};
 // ---------- i18n ----------
 const I18N={
   en:{containers:'Containers',log:'Log',logout:'Log out',pause:'Pause',resume:'Resume',pauseTag:'PAUSED',linesLbl:'lines',
+    logFilterPh:'filter text…',logCatAll:'All events',logCatAudit:'Audit (changes)',logCatTask:'Tasks',logCatError:'Errors / rollback',logCsv:'Export CSV',
     wizard:'Wizard',themeWord:'Theme',change:'Change',
     thName:'Machine',thSystem:'System',thBackup:'Backup',thSnaps:'Snapshots',thSchedule:'Schedule',thScope:'Scope + health',thLast:'Last',
     edit:'Edit',disabled:'disabled',allDays:'daily',paused:'paused',
@@ -566,6 +579,7 @@ const I18N={
     wizApplyDone:'Done — schedule + policy applied. Welcome aboard.',wizApplyPlan:'Apply & finish',wizNoPlan:'Propose a schedule first (step 3).',
     yes:'yes',no:'no'},
   pl:{containers:'Kontenery',log:'Log',logout:'Wyloguj',pause:'Pauza',resume:'Wznów',pauseTag:'PAUZA',linesLbl:'linii',
+    logFilterPh:'filtruj tekst…',logCatAll:'Wszystkie zdarzenia',logCatAudit:'Audyt (zmiany)',logCatTask:'Zadania',logCatError:'Błędy / rollback',logCsv:'Eksport CSV',
     wizard:'Kreator',themeWord:'Motyw',change:'Zmień',
     thName:'Maszyna',thSystem:'System',thBackup:'Backup',thSnaps:'Migawki',thSchedule:'Harmonogram',thScope:'Zakres + health',thLast:'Ostatnio',
     edit:'Edytuj',disabled:'wyłączony',allDays:'codz.',paused:'pauza',
@@ -746,7 +760,10 @@ const mPct=m=>m/RIB_LEN*100;              // duration (minutes) -> % of the axis
 const inAxis=m=>ribNorm(m)<=RIB_LEN;
 function renderGantt(d){
   const inv=d.inventory||{};
-  el('ganttAxis').innerHTML=[0,2,4,6,8,10,11].map(h=>`<span>${fmtMin(RIB_START+h*60)}</span>`).join('');
+  const ticks=[0,2,4,6,8,10,11].map(h=>RIB_START+h*60);
+  el('ganttAxis').innerHTML=ticks.map(m=>{const p=ribPct(m),tx=p<=1?'0':(p>=99?'-100%':'-50%');
+    return `<span style="left:${p}%;transform:translateX(${tx})">${fmtMin(m)}</span>`;}).join('');
+  const grid=ticks.map(m=>`<i style="left:${ribPct(m)}%"></i>`).join('');
   el('ribbonHint').textContent=(inv.windows&&inv.windows.length)?t('ribbonHint'):'— '+t('noWindows');
 
   // backup windows drawn as faint full-height bands inside EVERY track (aligned columns)
@@ -826,7 +843,7 @@ function renderGantt(d){
     }
     html+=`<div class="grow${zone?' conflict':''}"><div class="glabel"><span class="nm">${g.name}</span><span class="id">${g.vmid}</span><span class="day">${wdList(g.wds)}</span></div>${track(inner)}</div>`;
   }
-  el('ganttRows').innerHTML=html;
+  el('ganttRows').innerHTML=`<div class="ggrid">${grid}</div>`+html;
   el('ganttRows').querySelectorAll('.fbtn').forEach(btn=>btn.onclick=async()=>{
     const on=!btn.classList.contains('on');
     await fetch('/api/forbidden',{method:'POST',headers:{'Content-Type':'application/json'},
@@ -1010,16 +1027,49 @@ el('pauseBtn').onclick=async()=>{await fetch('/api/settings',{method:'POST',head
 el('logout').onclick=async()=>{await fetch('/api/logout',{method:'POST'});location.href='/login';};
 
 // ---------- log ----------
-async function loadLog(){
+let LOGLINES=[],LOGTOTAL=0;
+function logCat(l){
+  if(/\[audit\]/.test(l))return 'audit';
+  if(/rollback|failed|\bfail\b|error|nieudan|rejected|brak świeżej|problem/i.test(l))return 'error';
+  if(/\]\s+\d+\s+\[(update|snapshot|purge)\]|host-update\s*->/.test(l))return 'task';
+  return 'other';
+}
+function logMatch(l){
+  const q=(el('logSearch').value||'').toLowerCase(),cat=el('logCat').value;
+  if(q && !l.toLowerCase().includes(q))return false;
+  if(cat!=='all' && logCat(l)!==cat)return false;
+  return true;
+}
+function renderLog(){
   const box=el('logbox'),sc=box.parentElement;
   const atBottom=sc.scrollTop+sc.clientHeight>=sc.scrollHeight-30;
-  const n=+el('logLines').value||200;
-  const d=await fetch('/api/log?lines='+n).then(r=>r.json());
-  box.textContent=d.log||t('empty');
-  el('logMeta').textContent=`${d.shown||0} / ${d.total||0} ${t('linesLbl')} · ${new Date().toLocaleTimeString()}`;
+  const shown=LOGLINES.filter(logMatch);
+  box.textContent=shown.join('\n')||t('empty');
+  el('logMeta').textContent=`${shown.length} / ${LOGTOTAL} ${t('linesLbl')} · ${new Date().toLocaleTimeString()}`;
   if(atBottom)sc.scrollTop=sc.scrollHeight;
 }
+async function loadLog(){
+  const n=+el('logLines').value||200;
+  const d=await fetch('/api/log?lines='+n).then(r=>r.json());
+  LOGLINES=(d.log||'').split('\n').filter(l=>l.trim());
+  LOGTOTAL=d.total||LOGLINES.length;
+  renderLog();
+}
 el('logLines').onchange=loadLog;
+el('logSearch').oninput=renderLog;
+el('logCat').onchange=renderLog;
+el('logCsv').onclick=()=>{
+  const rows=[['timestamp','category','message']];
+  for(const l of LOGLINES.filter(logMatch)){
+    const m=l.match(/^\[([^\]]+)\]\s*(.*)$/);
+    rows.push([m?m[1]:'',logCat(l),m?m[2]:l]);
+  }
+  const csv=rows.map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\r\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'}));
+  a.download='adminupdater-log-'+new Date().toISOString().slice(0,19).replace(/[:T]/g,'')+'.csv';
+  a.click();URL.revokeObjectURL(a.href);
+};
 function startLogAuto(){stopLogAuto();if(el('logAuto').checked)logTimer=setInterval(loadLog,5000);}
 function stopLogAuto(){if(logTimer){clearInterval(logTimer);logTimer=null;}}
 el('logRefresh').onclick=loadLog;
