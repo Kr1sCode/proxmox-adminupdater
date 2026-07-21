@@ -12,20 +12,20 @@ it reuses the same config/schedule/UI lineage.
 
 ## Screenshots
 
-**Service window** — the mission-control view. The two schedule anchors (the daily
-backup window in red, the PVE host update in amber) are drawn across every row, and
-each LXC is laid out around them: a per-machine timeline showing the pre-update
-snapshot → update → prune, its time and retention. It also surfaces **other
-scheduled host maintenance** that competes for disk IO — ZFS scrub/trim, mdadm
-check, e2scrub, fstrim, unattended apt, offsite backups — as read-only rows you can
-one-click "avoid". EN/PL and light/dark built in.
+**Service window** — the mission-control view, now a **week view**. Day tabs (each
+night with its machine count) let you drill into any night; the two anchors (the
+daily backup window in red, the PVE host update in amber) and **other scheduled host
+maintenance** that competes for disk IO — ZFS scrub/trim, mdadm check, e2scrub,
+fstrim, unattended apt, offsite backups — are drawn per-night as read-only rows you
+can one-click "avoid", with each enrolled LXC laid out around them (snapshot → update
+→ prune, time, retention). EN/PL and light/dark built in.
 
 ![Service window](docs/dashboard-service-window.png)
 
 **LXC machines** — the fleet table: per-guest backup freshness, snapshot count,
-update scope + health-check, and one-click Snapshot / Update / Purge / Edit. The
-example below shows a container using auto app-update (`app:auto`) with an auto
-health-check and post-update reboot.
+update scope + health-check, its scheduled **night + time**, and one-click Snapshot /
+Update / Purge / Edit. The example shows the whole fleet **spread across the week**
+(Mo–Su) with auto app-update (`app:auto`) and an auto health-check.
 
 ![LXC machines](docs/dashboard-machines.png)
 
