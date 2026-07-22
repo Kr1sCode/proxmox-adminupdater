@@ -876,27 +876,84 @@ def scan_host_jobs():
     return {"jobs": uniq, "light_count": light}
 
 
+# ---- learn each backup job's REAL duration from the PVE task history ----------
+# The volid filename only carries a guest's START time (in UTC), so it cannot tell us
+# when a job FINISHED — a job that starts 23:00 and runs 2 h past midnight looked like
+# a 30-min window. Instead we read the last completed vzdump TASK (start+end epoch) and
+# convert to local time, so the window reflects how long the backup actually took.
+def _node_name():
+    try:
+        arr = json.loads(_sh(["pvesh", "get", "/nodes", "--output-format", "json"], 15) or "[]")
+        if arr:
+            return arr[0].get("node")
+    except (ValueError, KeyError, IndexError):
+        pass
+    return (_sh(["hostname"], 5) or "").strip() or None
+
+
+def _recent_vzdump_tasks(node, limit=100):
+    if not node:
+        return []
+    raw = _sh(["pvesh", "get", f"/nodes/{node}/tasks", "--typefilter", "vzdump",
+               "--limit", str(limit), "--output-format", "json"], 25)
+    try:
+        tasks = json.loads(raw) if raw.strip() else []
+    except ValueError:
+        return []
+    ok = [t for t in tasks if t.get("starttime") and t.get("endtime")]
+    ok.sort(key=lambda t: -int(t["starttime"]))
+    return ok
+
+
+def _circ_dist(a, b):
+    d = abs(a - b) % 1440
+    return min(d, 1440 - d)
+
+
+def learn_windows(jobs):
+    """{job_id: (start_min, end_min)} learned from the last completed vzdump task whose
+    weekday + start-of-day match the job's schedule. end carries a small tail margin."""
+    tasks = _recent_vzdump_tasks(_node_name())
+    learned = {}
+    for j in jobs:
+        smin = _hhmm_min(j.get("schedule"))
+        if smin is None:
+            continue
+        jdays = _schedule_days(j.get("schedule"))
+        for t in tasks:
+            st = time.localtime(int(t["starttime"]))
+            if jdays is not None and st.tm_wday not in jdays:
+                continue
+            if _circ_dist(st.tm_hour * 60 + st.tm_min, smin) > 45:
+                continue
+            et = time.localtime(int(t["endtime"]))
+            end = (et.tm_hour * 60 + et.tm_min + 5) % 1440     # +5 min tail margin
+            if (end - smin) % 1440 > 480:                      # sanity guard: cap at 8h
+                end = (smin + 180) % 1440
+            learned[j["id"]] = (smin, end)
+            break
+    return learned
+
+
 def build_inventory():
-    """Read-only fleet scan. Windows are LEARNED: start from the job schedule,
-    end from the latest actual backup completion among the job's guests (+15 min)."""
+    """Read-only fleet scan. Backup windows are LEARNED from the PVE task history: the
+    real [start, end] of the last matching vzdump run (crossing midnight is fine)."""
     jobs = detect_backup_jobs()
     storages = sorted({j.get("storage") for j in jobs if j.get("storage")})
     cov, by_st = cached_coverage(storages)
+    learned = learn_windows(jobs)
     windows = []
     for j in jobs:
         smin = _hhmm_min(j.get("schedule"))
         if smin is None:            # monthly / non-daily -> no daily window
             continue
-        # window end = latest completion among THIS job's guests ON THIS job's storage
-        # (+15 min), so a fast daily job elsewhere can't inflate a weekly window. Full
-        # timestamps compare chronologically, so a run crossing midnight is handled.
-        stmap = by_st.get(j.get("storage"), {})
-        tss = [stmap[v] for v in j.get("vmids", []) if v in stmap]
-        end = (_ts_min(max(tss)) + 15) % 1440 if tss and _ts_min(max(tss)) is not None else (smin + 180) % 1440
-        if (end - smin) % 1440 > 360:   # sanity cap: never let a window exceed 6h
-            end = (smin + 180) % 1440
-        windows.append({"job": j["id"], "start_min": smin, "end_min": end,
-                        "storage": j.get("storage"), "days": _schedule_days(j.get("schedule"))})
+        if j["id"] in learned:
+            start_min, end_min = learned[j["id"]]
+        else:                       # no task history yet -> conservative 3h guess
+            start_min, end_min = smin, (smin + 180) % 1440
+        windows.append({"job": j["id"], "start_min": start_min, "end_min": end_min,
+                        "storage": j.get("storage"), "days": _schedule_days(j.get("schedule")),
+                        "learned": j["id"] in learned})
     guests = {}
     for line in _sh(["pct", "list"], 15).splitlines()[1:]:
         c = line.split()
