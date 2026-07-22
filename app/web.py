@@ -344,6 +344,7 @@ def api_plan():
     if not _bearer_ok(request):
         return jsonify({"error": "unauthorized"}), 401
     import datetime as dt
+    up.touch_exec()   # heartbeat: a dead timer / wrong token shows up in the watchdog
     # scheduled jobs (idempotent via last_run) + one-shot ad-hoc jobs from the queue
     jobs = up.compute_plan() + up.take_queue()
     return jsonify({"generated_at": dt.datetime.utcnow().isoformat() + "Z",
@@ -393,4 +394,6 @@ def api_inventory():
 
 @app.route("/api/health")
 def api_health():
-    return jsonify({"ok": True})
+    # liveness (ok) + watchdog detail (PVE API reachability + executor heartbeat).
+    # Session-authed via the before_request gate; the browser polls it for the pill.
+    return jsonify({"ok": True, **up.health()})

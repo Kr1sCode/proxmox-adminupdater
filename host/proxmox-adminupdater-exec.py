@@ -641,7 +641,8 @@ def post_host_status(cfg):
 
 # ---- fleet inventory: backup jobs + windows + per-guest coverage --------------
 INVENTORY_TS = "/var/lib/proxmox-adminupdater/inventory.ts"
-INVENTORY_TTL = 3600   # re-scan at most hourly (pvesm over network is slow)
+INVENTORY_TTL = 240    # refresh ~every tick; the slow pvesm part is cached hourly
+                       # (cached_coverage), so config/schedule changes surface "on the fly"
 
 
 def _sh(cmd, t=25):
@@ -680,13 +681,45 @@ def _hhmm_min(s):
     return int(m.group(1)) * 60 + int(m.group(2)) if m else None
 
 
+_WD = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
+
+
+def _schedule_days(sched):
+    """Parse the weekday spec of a systemd-calendar / vzdump schedule into a sorted
+    list of weekdays (Mon=0..Sun=6). Returns None for an every-day schedule.
+    Handles 'mon..fri 23:00', 'sat 00:30', 'mon,wed,fri 02:00', '*-*-* 01:00',
+    'daily', and a bare 'HH:MM'."""
+    s = (sched or "").lower()
+    mt = re.search(r"\d{1,2}:\d{2}", s)
+    head = (s[:mt.start()] if mt else s).replace("*", " ").strip()
+    if not head or "daily" in s:
+        return None                                   # every day
+    days = set()
+    for part in re.split(r"[,\s]+", head):
+        mr = re.match(r"([a-z]{3})\.\.([a-z]{3})$", part)
+        if mr and mr.group(1) in _WD and mr.group(2) in _WD:
+            a, b = _WD[mr.group(1)], _WD[mr.group(2)]
+            days.update(range(a, b + 1) if a <= b
+                        else list(range(a, 7)) + list(range(0, b + 1)))
+        elif part in _WD:
+            days.add(_WD[part])
+    return sorted(days) or None
+
+
 def _ts_min(ts):
     m = re.search(r"\b(\d\d):(\d\d):\d\d\b", ts or "")
     return int(m.group(1)) * 60 + int(m.group(2)) if m else None
 
 
+COVERAGE_CACHE = "/var/lib/proxmox-adminupdater/coverage.json"
+COVERAGE_TTL = 3600   # pvesm list hits network storages (PBS/NFS) -> cache hourly
+
+
 def backup_coverage(storages):
-    cov = {}
+    """Latest backup per guest overall (cov, for freshness) AND per (storage,guest)
+    (by_st, so a window's end is derived from ITS OWN storage's completions, not a
+    faster daily job on a different storage)."""
+    cov, by_st = {}, {}
     for st in storages:
         for line in _sh(["pvesm", "list", st], 25).splitlines()[1:]:
             c = line.split()
@@ -697,9 +730,33 @@ def backup_coverage(storages):
             if not m:
                 continue
             ts = "{}-{}-{} {}:{}:{}".format(*m.groups())
+            sm = by_st.setdefault(st, {})
+            if vmid not in sm or ts > sm[vmid]:
+                sm[vmid] = ts
             if vmid not in cov or ts > cov[vmid]["ts"]:
                 cov[vmid] = {"storage": st, "ts": ts}
-    return cov
+    return cov, by_st
+
+
+def cached_coverage(storages):
+    """pvesm over the network is the slow part of the scan; everything else (jobs.cfg,
+    host-maintenance, pct list) is local and re-read every tick. Cache ONLY coverage,
+    hourly, so backup-config/schedule changes still surface 'on the fly' each tick."""
+    try:
+        if time.time() - os.path.getmtime(COVERAGE_CACHE) < COVERAGE_TTL:
+            d = json.load(open(COVERAGE_CACHE))
+            if d.get("cov"):
+                return d["cov"], d.get("by_st", {})
+    except (OSError, ValueError):
+        pass
+    cov, by_st = backup_coverage(storages)
+    if cov:                                            # never cache an empty/failed scan
+        try:
+            os.makedirs(os.path.dirname(COVERAGE_CACHE), exist_ok=True)
+            json.dump({"cov": cov, "by_st": by_st}, open(COVERAGE_CACHE, "w"))
+        except OSError:
+            pass
+    return cov, by_st
 
 
 # ---- host maintenance scan (read-only situational awareness) ------------------
@@ -807,7 +864,16 @@ def scan_host_jobs():
             name or (cmd.split()[0][:22] if cmd else src), io, start, sched, "cron", approx, wd)
 
     jobs.sort(key=lambda j: (j["start_min"] is None, j["start_min"] or 0))
-    return {"jobs": jobs, "light_count": light}
+    # collapse duplicates of the SAME logical maintenance (e.g. e2scrub as both a
+    # systemd timer AND /etc/cron.d entry, or mdcheck start+continue) to one row,
+    # keeping the earliest occurrence — distinct types (scrub/trim/fstrim/…) stay.
+    uniq, byname = [], set()
+    for j in jobs:
+        if j["name"] in byname:
+            continue
+        byname.add(j["name"])
+        uniq.append(j)
+    return {"jobs": uniq, "light_count": light}
 
 
 def build_inventory():
@@ -815,17 +881,22 @@ def build_inventory():
     end from the latest actual backup completion among the job's guests (+15 min)."""
     jobs = detect_backup_jobs()
     storages = sorted({j.get("storage") for j in jobs if j.get("storage")})
-    cov = backup_coverage(storages)
+    cov, by_st = cached_coverage(storages)
     windows = []
     for j in jobs:
         smin = _hhmm_min(j.get("schedule"))
         if smin is None:            # monthly / non-daily -> no daily window
             continue
-        # latest completion = max of FULL timestamps (lexicographic = chronological,
-        # so a backup that crosses midnight is handled correctly), then +15 min margin.
-        tss = [cov[v]["ts"] for v in j.get("vmids", []) if v in cov]
+        # window end = latest completion among THIS job's guests ON THIS job's storage
+        # (+15 min), so a fast daily job elsewhere can't inflate a weekly window. Full
+        # timestamps compare chronologically, so a run crossing midnight is handled.
+        stmap = by_st.get(j.get("storage"), {})
+        tss = [stmap[v] for v in j.get("vmids", []) if v in stmap]
         end = (_ts_min(max(tss)) + 15) % 1440 if tss and _ts_min(max(tss)) is not None else (smin + 180) % 1440
-        windows.append({"job": j["id"], "start_min": smin, "end_min": end, "storage": j.get("storage")})
+        if (end - smin) % 1440 > 360:   # sanity cap: never let a window exceed 6h
+            end = (smin + 180) % 1440
+        windows.append({"job": j["id"], "start_min": smin, "end_min": end,
+                        "storage": j.get("storage"), "days": _schedule_days(j.get("schedule"))})
     guests = {}
     for line in _sh(["pct", "list"], 15).splitlines()[1:]:
         c = line.split()

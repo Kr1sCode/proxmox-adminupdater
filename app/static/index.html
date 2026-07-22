@@ -34,6 +34,25 @@
   .brand{display:flex;align-items:baseline;gap:10px}
   .brand .logo{font-size:18px;font-weight:700}
   .brand .node{font-family:var(--mono);font-size:12px;color:var(--ink-dim);padding:3px 8px;border:1px solid var(--border);border-radius:99px}
+  /* watchdog — live PVE-API + executor heartbeat pill */
+  .watchwrap{position:relative}
+  .watch{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;letter-spacing:.04em;
+         padding:4px 10px;border-radius:99px;border:1px solid var(--border);background:transparent;color:var(--ink-dim);cursor:pointer}
+  .watch .dot{width:8px;height:8px;border-radius:50%;background:currentColor;box-shadow:0 0 0 0 currentColor;animation:wpulse 2.4s ease-out infinite}
+  @keyframes wpulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,currentColor 60%,transparent)}70%{box-shadow:0 0 0 6px transparent}100%{box-shadow:0 0 0 0 transparent}}
+  @media (prefers-reduced-motion:reduce){.watch .dot{animation:none}}
+  .watch.ok{color:var(--good);border-color:color-mix(in srgb,var(--good) 45%,var(--border))}
+  .watch.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 55%,var(--border))}
+  .watch.err{color:var(--crit);border-color:color-mix(in srgb,var(--crit) 60%,var(--border));background:var(--crit-bg)}
+  .watch.wait{color:var(--ink-mute)}
+  .watchpop{position:absolute;top:calc(100% + 8px);left:0;z-index:40;min-width:260px;display:none;
+            background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px;
+            box-shadow:0 12px 34px rgba(0,0,0,.35);font-size:12.5px}
+  .watchwrap.open .watchpop{display:block}
+  .watchpop .wl{display:flex;justify-content:space-between;gap:16px;padding:5px 0;border-bottom:1px solid var(--border-soft)}
+  .watchpop .wl:last-child{border-bottom:0}
+  .watchpop .wl b{font-family:var(--mono);font-weight:600}
+  .watchpop .wv.ok{color:var(--good)}.watchpop .wv.warn{color:var(--warn)}.watchpop .wv.err{color:var(--crit)}
   .sp{flex:1}
   button{font:inherit}
   .btn{font-size:13px;color:var(--ink);background:var(--surface);border:1px solid var(--border);
@@ -165,10 +184,16 @@
   table{width:100%;border-collapse:collapse}
   thead th{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-mute);
            text-align:left;padding:11px 14px;border-bottom:1px solid var(--border)}
-  td{padding:11px 14px;border-bottom:1px solid var(--border-soft);vertical-align:middle}
+  td{padding:11px 14px;border-bottom:1px solid var(--border-soft);vertical-align:middle;transition:background .12s ease}
   tbody tr:last-child td{border-bottom:0}
-  tbody tr:hover td{background:var(--surface-2)}
-  tr.rowwarn td{background:linear-gradient(90deg,var(--warn-bg),transparent 40%)}
+  /* hover: a subtle accent-tinted wash that keeps the chip colours legible, plus a
+     left accent marker — never a flat grey that swallows the row's semantics */
+  tbody tr:hover td{background:color-mix(in srgb,var(--accent) 9%,var(--surface))}
+  tbody tr:hover td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
+  tr.rowwarn td{background:linear-gradient(90deg,var(--warn-bg),transparent 42%)}
+  /* a warning row keeps (and slightly deepens) its amber tint on hover */
+  tr.rowwarn:hover td{background:linear-gradient(90deg,color-mix(in srgb,var(--warn) 20%,var(--warn-bg)),transparent 60%)}
+  tr.rowwarn:hover td:first-child{box-shadow:inset 3px 0 0 var(--warn)}
   .gname{display:flex;align-items:baseline;gap:9px}
   .gname .nm{font-weight:600}
   .gname .id{font-family:var(--mono);font-size:11px;color:var(--ink-mute)}
@@ -252,6 +277,7 @@
 <body>
 <div class="cmd">
   <div class="brand"><span class="logo"><span class="brandic" data-ic="shield"></span> adminupdater</span><span class="node mono" id="nodeName"></span></div>
+  <div class="watchwrap"><button class="watch wait" id="watch" title=""><span class="dot"></span><span id="watchTxt">API</span></button><div class="watchpop" id="watchPop"></div></div>
   <span id="pausewrap"></span>
   <span class="sp"></span>
   <button class="btn ghost" id="openWiz"><span data-ic="wand"></span> <span data-i18n="wizard">Wizard</span></button>
@@ -520,7 +546,10 @@ let SET={},HU={},DATA={guests:[]},GDAY=null;
 
 // ---------- i18n ----------
 const I18N={
-  en:{containers:'Containers',log:'Log',logout:'Log out',pause:'Pause',resume:'Resume',pauseTag:'PAUSED',linesLbl:'lines',
+  en:{whOk:'API OK',whApi:'API',whPve:'PVE API',whExec:'Executor',whInv:'Inventory',whAgo:'{a} ago',whNever:'never',
+    whInvOk:'{g} guests · {w} windows',whInvNone:'empty',whFail:'error',whUnreach:'panel API unreachable',
+    whDegraded:'degraded — click for details',
+    containers:'Containers',log:'Log',logout:'Log out',pause:'Pause',resume:'Resume',pauseTag:'PAUSED',linesLbl:'lines',
     logFilterPh:'filter text…',logCatAll:'All events',logCatAudit:'Audit (changes)',logCatTask:'Tasks',logCatError:'Errors / rollback',logCsv:'Export CSV',
     wizard:'Wizard',themeWord:'Theme',change:'Change',
     thName:'Machine',thSystem:'System',thBackup:'Backup',thSnaps:'Snapshots',thSchedule:'Schedule',thScope:'Scope + health',thLast:'Last',
@@ -582,7 +611,7 @@ const I18N={
     wizWinFound:'Detected backup window {w}',wizAvoiding:'avoiding this window',wizWinNone:'No backup job detected yet — the host learns windows from real backups.',
     wizNoBkList:'No backup — kept out of auto-update',wizNoBkNote:"I won't auto-update machines without a copy. You can enable them consciously.",
     next2:'Next: backup coverage →',next3:'Next: schedule →',next4:'Next: scope + health →',next5:'Next: notifications →',
-    wizCovLead:'Pick which machines the update schedule covers — tick to include, untick to exclude. Those without a fresh backup are unticked by default (the pre-update snapshot is still taken either way).',
+    wizCovLead:'Every machine is enrolled by default — untick any you do NOT want the update schedule to cover. Machines without a fresh backup are flagged, but a pre-update snapshot is always taken regardless.',
     wizCovNote:'Selected: {n} machine(s) to enrol.',wizLxcWindow:'LXC maintenance window',
     fresh:'fresh',stale:'stale',none:'none',
     wizSchedLead:'I place updates into your maintenance window and skip every backup window. Adjust and press Propose.',
@@ -594,7 +623,10 @@ const I18N={
     wizNotifNote:'Configure recipient + when in host.conf: notify_email, notify_on = always|errors|never. Nothing to enter here.',
     wizApplyDone:'Done — schedule + policy applied. Welcome aboard.',wizApplyPlan:'Apply & finish',wizNoPlan:'Propose a schedule first (step 3).',
     yes:'yes',no:'no'},
-  pl:{containers:'Kontenery',log:'Log',logout:'Wyloguj',pause:'Pauza',resume:'Wznów',pauseTag:'PAUZA',linesLbl:'linii',
+  pl:{whOk:'API OK',whApi:'API',whPve:'PVE API',whExec:'Executor',whInv:'Inventory',whAgo:'{a} temu',whNever:'nigdy',
+    whInvOk:'{g} gości · {w} okien',whInvNone:'puste',whFail:'błąd',whUnreach:'API panelu nieosiągalne',
+    whDegraded:'ograniczone — kliknij po szczegóły',
+    containers:'Kontenery',log:'Log',logout:'Wyloguj',pause:'Pauza',resume:'Wznów',pauseTag:'PAUZA',linesLbl:'linii',
     logFilterPh:'filtruj tekst…',logCatAll:'Wszystkie zdarzenia',logCatAudit:'Audyt (zmiany)',logCatTask:'Zadania',logCatError:'Błędy / rollback',logCsv:'Eksport CSV',
     wizard:'Kreator',themeWord:'Motyw',change:'Zmień',
     thName:'Maszyna',thSystem:'System',thBackup:'Backup',thSnaps:'Migawki',thSchedule:'Harmonogram',thScope:'Zakres + health',thLast:'Ostatnio',
@@ -655,7 +687,7 @@ const I18N={
     wizWinFound:'Wykryto okno backupu {w}',wizAvoiding:'omijam to okno',wizWinNone:'Nie wykryto jeszcze zadania backupu — host uczy się okien z realnych kopii.',
     wizNoBkList:'Brak backupu — pomijam z auto-update',wizNoBkNote:'Nie planuję automatycznych aktualizacji maszyn bez kopii. Możesz włączyć świadomie.',
     next2:'Dalej: pokrycie backupem →',next3:'Dalej: harmonogram →',next4:'Dalej: zakres + health →',next5:'Dalej: powiadomienia →',
-    wizCovLead:'Wybierz, które maszyny obejmuje harmonogram aktualizacji — zaznacz, by włączyć, odznacz, by pominąć. Te bez świeżej kopii są domyślnie odznaczone (migawka przed aktualizacją i tak jest robiona).',
+    wizCovLead:'Domyślnie objęte są WSZYSTKIE maszyny — odznacz te, których harmonogram aktualizacji ma NIE obejmować. Maszyny bez świeżej kopii są oznaczone, ale migawka przed aktualizacją i tak jest zawsze robiona.',
     wizCovNote:'Wybrano: {n} maszyn do objęcia.',wizLxcWindow:'Okno serwisowe LXC',
     fresh:'świeża',stale:'nieświeża',none:'brak',
     wizSchedLead:'Układam aktualizacje w Twoim oknie serwisowym i omijam każde okno backupu. Dostrój i naciśnij Zaproponuj.',
@@ -800,7 +832,10 @@ function renderGantt(d){
   const hostToday=(hostM!=null)&&(!HUwd.length||HUwd.includes(GDAY));
   // faint aligned columns drawn in EVERY row: the two anchors to avoid — each
   // detected backup window (red) and the host-update slot (amber).
-  let bands=(inv.windows||[]).filter(w=>inAxis(w.start_min)||inAxis(w.end_min)).map(w=>{
+  // each backup window carries its own weekdays (mon..fri / sat / …); show only the
+  // ones that actually run on the night being viewed. days==null means every night.
+  const dayWins=(inv.windows||[]).filter(w=>w.days==null||w.days.includes(GDAY));
+  let bands=dayWins.filter(w=>inAxis(w.start_min)||inAxis(w.end_min)).map(w=>{
     const l=ribPct(w.start_min), width=Math.max(1.5,Math.min(mPct((((w.end_min-w.start_min)%1440)+1440)%1440),100-l));
     return `<div class="gband backup" style="left:${l}%;width:${width}%"></div>`;
   }).join('');
@@ -811,9 +846,9 @@ function renderGantt(d){
   const track=inner=>`<div class="gtrack">${bands}${inner}</div>`;
 
   let html='';
-  // --- anchor row 1: the backup window (daily) ---
-  const bw=(inv.windows||[])[0];
-  html+=`<div class="grow ref"><div class="glabel"><span class="nm">${ic('database','crit')} ${t('ganttBackup')}</span><span class="day">${t('ganttDaily')}</span></div>`+
+  // --- anchor row 1: the backup window(s) active on the viewed night ---
+  const bw=dayWins[0];
+  html+=`<div class="grow ref"><div class="glabel"><span class="nm">${ic('database','crit')} ${t('ganttBackup')}</span><span class="day">${bw?(bw.days?wdList(bw.days):t('ganttDaily')):t('ganttDaily')}</span></div>`+
     track(bw?`<div class="gbar backupbar" style="left:${ribPct(bw.start_min)}%;width:${Math.max(6,mPct((((bw.end_min-bw.start_min)%1440)+1440)%1440))}%">${fmtMin(bw.start_min)}–${fmtMin(bw.end_min)}</div>`
             :`<span class="gempty">${t('noWindows')}</span>`)+`</div>`;
 
@@ -838,7 +873,7 @@ function renderGantt(d){
 
   // is a minute inside a forbidden zone (backup window, host slot, or a promoted job)?
   const inZone=m=>{
-    for(const w of (inv.windows||[])){const s=+w.start_min,e=+w.end_min;
+    for(const w of dayWins){const s=+w.start_min,e=+w.end_min;
       if((s<=e)?(s<=m&&m<e):(m>=s||m<e))return 'backup';}
     if(hostToday){const s=hostM,e=(hostM+30)%1440;
       if((s<=e)?(s<=m&&m<e):(m>=s||m<e))return 'host';}
@@ -945,7 +980,33 @@ async function load(){
   d._queue=QMAP;DATA=d;
   el('nodeName').textContent=(d.host&&d.host.pve)?d.host.pve:'PVE';
   render();
+  loadHealth();
 }
+
+// ---------- watchdog: PVE-API + executor heartbeat ----------
+function fmtAge(s){if(s==null)return t('whNever');if(s<90)return s+' s';if(s<5400)return Math.round(s/60)+' min';return Math.round(s/3600)+' h';}
+async function loadHealth(){
+  let h;try{h=await fetch('/api/health').then(r=>r.json());}catch(e){h=null;}
+  const w=el('watch'),pop=el('watchPop');
+  if(!h){w.className='watch err';el('watchTxt').textContent=t('whApi');w.title=t('whUnreach');pop.innerHTML='';return;}
+  const pveOk=h.pve&&h.pve.ok;
+  const execAge=h.exec?h.exec.age_s:null;
+  const execStale=execAge==null||execAge>900;              // no check-in for >15 min
+  const invEmpty=!h.inventory||!h.inventory.guests;
+  // red if PVE down; amber if executor stale or inventory empty; green otherwise
+  const cls=!pveOk?'err':((execStale||invEmpty)?'warn':'ok');
+  w.className='watch '+cls;
+  el('watchTxt').textContent=cls==='ok'?t('whOk'):t('whApi');
+  const line=(lbl,val,st)=>`<div class="wl"><span>${lbl}</span><span class="wv ${st}"><b>${val}</b></span></div>`;
+  pop.innerHTML=
+    line(t('whPve'),pveOk?`OK · ${h.pve.ms} ms`:(h.pve.error||t('whFail')),pveOk?'ok':'err')+
+    line(t('whExec'),execStale?t('whAgo',{a:fmtAge(execAge)}):t('whAgo',{a:fmtAge(execAge)}),execStale?'warn':'ok')+
+    line(t('whInv'),invEmpty?t('whInvNone'):t('whInvOk',{g:h.inventory.guests,w:h.inventory.windows}),invEmpty?'warn':'ok');
+  w.title=cls==='ok'?t('whOk'):(!pveOk?(h.pve.error||t('whFail')):t('whDegraded'));
+}
+el('watch').onclick=()=>{el('watch').parentElement.classList.toggle('open');};
+document.addEventListener('click',e=>{const ww=el('watch').parentElement;if(ww.classList.contains('open')&&!ww.contains(e.target))ww.classList.remove('open');});
+setInterval(loadHealth,30000);
 
 // ---------- ad-hoc actions ----------
 async function postAction(action,vmids){
@@ -1225,7 +1286,7 @@ function renderWiz(){
       ${noBk.length?`<div class="prop"><div class="row"><b>${noBk.map(x=>x.name+' ('+x.vmid+')').join(', ')}</b><span class="toggle" style="color:var(--warn);background:var(--warn-bg)">${t('wizNoBkList')}</span></div><div class="note">${t('wizNoBkNote')}</div></div>`:''}
       ${hostJobsBlock(inv)}`;
   }else if(WSTEP===2){
-    if(WSEL===null)WSEL=new Set(g.filter(x=>x.backup&&x.backup.fresh).map(x=>x.vmid));
+    if(WSEL===null)WSEL=new Set(g.map(x=>x.vmid));   // default: ALL enrolled — untick to exclude
     const rows=g.map(x=>{const bk=x.backup||{};const st=bk.info?(bk.fresh?`<span class="chip good">${t('fresh')}</span>`:`<span class="chip warn">${t('stale')}</span>`):`<span class="chip crit">${t('none')}</span>`;
       return `<div class="r"><label style="display:flex;gap:9px;align-items:center;cursor:pointer;flex:1;min-width:0">
         <input type="checkbox" class="wsel" data-vmid="${x.vmid}" ${WSEL.has(x.vmid)?'checked':''}>

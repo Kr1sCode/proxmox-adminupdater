@@ -313,6 +313,34 @@ host_update_cmd  = apt update && apt --yes --no-new-pkgs upgrade
 host_update_log  = /var/log/proxmox-apt-upgrade.log
 EOF
   chmod 600 /etc/proxmox-adminupdater/host.conf
+else
+  # host.conf already exists (reinstall/upgrade). The brain regenerated its
+  # exec_token and the container IP may differ, so these two MUST be re-synced to
+  # the current container — otherwise the executor gets HTTP 401 and the panel
+  # silently shows no inventory. All user-edited settings are preserved.
+  info "host.conf istnieje — synchronizuję token i updater_url do bieżącego kontenera…"
+  python3 - "$EXECTOK" "http://${CT_IP}" <<'PY'
+import re, sys
+tok, url = sys.argv[1], sys.argv[2]
+p = "/etc/proxmox-adminupdater/host.conf"
+lines = open(p).read().splitlines()
+seen_tok = seen_url = False
+out = []
+for l in lines:
+    if re.match(r"^\s*token\s*=", l):
+        out.append("token          = " + tok); seen_tok = True
+    elif re.match(r"^\s*updater_url\s*=", l):
+        out.append("updater_url    = " + url); seen_url = True
+    else:
+        out.append(l)
+if not seen_url:
+    out.insert(1, "updater_url    = " + url)
+if not seen_tok:
+    out.append("token          = " + tok)
+open(p, "w").write("\n".join(out) + "\n")
+print("host.conf: token + updater_url zsynchronizowane")
+PY
+  chmod 600 /etc/proxmox-adminupdater/host.conf
 fi
 rm -rf "$htmp"
 systemctl daemon-reload

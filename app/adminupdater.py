@@ -208,6 +208,56 @@ RUNNING_STALE = 2 * 3600   # a "running" marker older than this is treated as de
 HOST_KEY = "_host"         # state slot for the PVE host's own update status + schedule
 INVENTORY_KEY = "_inventory"   # fleet scan posted by the host executor
 QUEUE_KEY = "_queue"       # one-shot ad-hoc jobs (snapshot/purge/update now)
+EXEC_SEEN_KEY = "_exec_seen"   # last time the host executor authenticated (heartbeat)
+
+
+def touch_exec():
+    """Stamp the executor heartbeat. Called on every authenticated /plan poll, so a
+    dead timer / wrong exec-token shows up in the watchdog within one tick."""
+    state = core.load_state()
+    state[EXEC_SEEN_KEY] = int(time.time())
+    core.save_state(state)
+
+
+def _short_err(e):
+    """A compact, secret-free reason string for the watchdog."""
+    import requests as _rq
+    if isinstance(e, _rq.HTTPError) and e.response is not None:
+        code = e.response.status_code
+        if code in (401, 403):
+            return f"token PVE odrzucony ({code})"
+        return f"PVE HTTP {code}"
+    if isinstance(e, _rq.exceptions.SSLError):
+        return "błąd TLS (certyfikat)"
+    if isinstance(e, _rq.exceptions.ConnectionError):
+        return "brak połączenia z PVE"
+    if isinstance(e, _rq.exceptions.Timeout):
+        return "PVE nie odpowiada (timeout)"
+    return e.__class__.__name__
+
+
+def health():
+    """Watchdog: is the brain->PVE API path alive (token valid, host reachable), and
+    is the host executor still checking in? Surfaces both failure modes that leave the
+    panel blank — a dead PVE token (no guest list) and a wrong exec-token (no inventory)."""
+    cfg = core.load_config()
+    pve = {"ok": False, "error": None, "ms": None}
+    t0 = time.time()
+    try:
+        core.PVE(cfg["settings"])._req("GET", "/version")
+        pve["ok"] = True
+    except Exception as e:  # noqa: BLE001
+        pve["error"] = _short_err(e)
+    pve["ms"] = int((time.time() - t0) * 1000)
+    state = core.load_state()
+    seen = state.get(EXEC_SEEN_KEY)
+    inv = state.get(INVENTORY_KEY, {})
+    now = int(time.time())
+    return {"now": now, "pve": pve,
+            "exec": {"last_seen": seen, "age_s": (now - int(seen)) if seen else None},
+            "inventory": {"checked": inv.get("checked"),
+                          "guests": len(inv.get("guests") or {}),
+                          "windows": len(inv.get("windows") or [])}}
 
 
 def set_inventory(data):
@@ -411,10 +461,16 @@ def _in_zone(minute, zones):
 
 
 def forbidden_zones(cfg, inv, weekday=None):
-    """Everyday hard zones: every detected backup window (daily) + host-maintenance
-    zones the user promoted to 'avoid'. Day-specific blockers (host update, detected
-    host-maintenance jobs) are added on top by day_zones()."""
-    zones = [(int(w["start_min"]), int(w["end_min"])) for w in inv.get("windows", [])]
+    """Hard zones for a given weekday: each detected backup window that runs that day
+    (windows carry their own 'days'; None = every day) + host-maintenance zones the
+    user promoted to 'avoid'. With weekday=None every window applies (conservative,
+    used by the manual-entry guard). Day-specific host jobs are added by day_zones()."""
+    zones = []
+    for w in inv.get("windows", []):
+        wd = w.get("days")
+        if weekday is not None and wd is not None and weekday not in wd:
+            continue                              # this backup runs on other days only
+        zones.append((int(w["start_min"]), int(w["end_min"])))
     for z in (cfg.get("extra_forbidden") or {}).values():
         try:
             zones.append((int(z["start_min"]), int(z["end_min"])))
@@ -662,14 +718,22 @@ def set_running(ctid, kind):
 
 
 def guest_view():
-    """UI helper: merge API guest list with config + last report + running flag."""
+    """UI helper: merge API guest list with config + last report + running flag.
+    Resilient: if the PVE API is momentarily unreachable (dead token, host down) we
+    fall back to the last inventory's guest list and flag pve_ok=False, so the panel
+    stays usable and the watchdog explains why — instead of a blank 500."""
     cfg = core.load_config()
-    pve = core.PVE(cfg["settings"])
-    idx = core.guest_index(pve, lxc_only=True)
     state = core.load_state()
     now = int(time.time())
     sett = cfg["settings"]
     inv = state.get(INVENTORY_KEY, {})
+    pve_ok = True
+    try:
+        idx = core.guest_index(core.PVE(sett), lxc_only=True)
+    except Exception:  # noqa: BLE001
+        pve_ok = False
+        idx = {vid: {"type": "lxc", "node": "?", "name": g.get("name", ""), "status": "?"}
+               for vid, g in (inv.get("guests") or {}).items()}
     fresh_h = int(sett.get("backup_fresh_hours", 24))
     out = []
     for vmid, meta in sorted(idx.items(), key=lambda kv: int(kv[0])):
@@ -689,7 +753,7 @@ def guest_view():
                     "backup": {"info": inv_g.get("backup"), "fresh": fresh},
                     "snapshots": inv_g.get("snapshots"),
                     "blocked_no_backup": blocked})
-    return {"settings": sett, "guests": out,
+    return {"settings": sett, "guests": out, "pve_ok": pve_ok,
             "host": state.get(HOST_KEY), "host_update": host_update_settings(cfg),
             "notify": notify_settings(cfg), "extra_forbidden": cfg.get("extra_forbidden") or {},
             "maintenance": maintenance_settings(cfg), "inventory": inv}
