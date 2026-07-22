@@ -192,10 +192,11 @@
      left accent marker — never a flat grey that swallows the row's semantics */
   tbody tr:hover td{background:color-mix(in srgb,var(--accent) 9%,var(--surface))}
   tbody tr:hover td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
-  tr.rowwarn td{background:linear-gradient(90deg,var(--warn-bg),transparent 42%)}
-  /* a warning row keeps (and slightly deepens) its amber tint on hover */
-  tr.rowwarn:hover td{background:linear-gradient(90deg,color-mix(in srgb,var(--warn) 20%,var(--warn-bg)),transparent 60%)}
-  tr.rowwarn:hover td:first-child{box-shadow:inset 3px 0 0 var(--warn)}
+  /* a flagged row is filled with a solid, uniform amber across its full width (no
+     gradient) and carries a persistent left marker */
+  tr.rowwarn td{background:var(--warn-bg)}
+  tr.rowwarn td:first-child{box-shadow:inset 3px 0 0 var(--warn)}
+  tr.rowwarn:hover td{background:color-mix(in srgb,var(--warn) 16%,var(--warn-bg))}
   .gname{display:flex;align-items:baseline;gap:9px}
   .gname .nm{font-weight:600}
   .gname .id{font-family:var(--mono);font-size:11px;color:var(--ink-mute)}
