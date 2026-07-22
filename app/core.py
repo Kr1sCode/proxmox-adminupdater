@@ -147,14 +147,36 @@ def check_token(settings, token):
     return r.status_code == 200
 
 
-def verify_credentials(settings, username, password):
+def verify_credentials(settings, username, password, tfa_response=None, tfa_challenge=None):
+    """Authenticate against the PVE host, honouring two-factor auth (TOTP/recovery).
+
+    Two-step, per the PVE /access/ticket contract:
+      * step 1 (password): if the user has TFA, PVE replies 200 with NeedTFA=1 and a
+        signed challenge in `ticket`. We return {"tfa": True, "challenge": <str>} and
+        DO NOT grant a session — this is what stops password-only from bypassing MFA.
+      * step 2 (tfa_challenge + tfa_response like "totp:123456"): PVE validates the
+        second factor and returns a full ticket -> {"ok": True}.
+
+    Returns one of: {"ok": True} | {"tfa": True, "challenge": str} | {"ok": False}.
+    """
     url = f"https://{settings['pve_host']}:{settings['pve_port']}/api2/json/access/ticket"
+    data = {"username": username}
+    if tfa_challenge:                      # step 2: the OTP response rides in `password`
+        data["tfa-challenge"] = tfa_challenge
+        data["password"] = tfa_response or ""
+    else:                                  # step 1: plain password
+        data["password"] = password
     try:
-        r = requests.post(url, data={"username": username, "password": password},
+        r = requests.post(url, data=data,
                           verify=bool(settings.get("verify_tls", False)), timeout=15)
     except requests.RequestException:
-        return False
-    return r.status_code == 200 and bool((r.json() or {}).get("data", {}).get("ticket"))
+        return {"ok": False}
+    if r.status_code != 200:
+        return {"ok": False}
+    d = (r.json() or {}).get("data") or {}
+    if d.get("NeedTFA"):                    # password was right, but a 2nd factor is due
+        return {"tfa": True, "challenge": d.get("ticket")}
+    return {"ok": bool(d.get("ticket"))}
 
 
 def is_configured():

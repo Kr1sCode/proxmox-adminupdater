@@ -146,16 +146,26 @@ def api_login():
         return jsonify({"error": "too many attempts, wait a few minutes"}), 429
     body = request.get_json(force=True) or {}
     user, pw = str(body.get("username", "")).strip(), str(body.get("password", ""))
+    challenge = str(body.get("tfa_challenge", "")).strip()
+    code = str(body.get("code", "")).strip()
     cfg = core.load_config()
     if user not in cfg["auth"].get("allowlist", ["root@pam"]):
         _record_fail(ip)
         return jsonify({"error": "user not allowed"}), 403
-    if not core.verify_credentials(cfg["settings"], user, pw):
+    if challenge:                          # step 2: completing a TFA challenge
+        # a bare 6-digit code is TOTP; an explicit "type:value" (e.g. recovery:xxxx) rides through
+        resp = code if ":" in code else f"totp:{code}"
+        res = core.verify_credentials(cfg["settings"], user, "", tfa_response=resp, tfa_challenge=challenge)
+    else:                                  # step 1: password
+        res = core.verify_credentials(cfg["settings"], user, pw)
+    if res.get("tfa"):                     # right password, second factor still required
+        return jsonify({"tfa": True, "challenge": res.get("challenge")})
+    if not res.get("ok"):
         _record_fail(ip)
         return jsonify({"error": "invalid credentials"}), 401
     session.permanent = True
     session["user"] = user
-    _audit(f"zalogowano z {ip}")
+    _audit(f"zalogowano z {ip}" + (" (2FA)" if challenge else ""))
     return jsonify({"ok": True, "user": user})
 
 

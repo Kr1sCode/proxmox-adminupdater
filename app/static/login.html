@@ -27,28 +27,47 @@
 <div class="box">
   <h1>◆ adminupdater</h1>
   <p class="hint" id="hint">Log in with your Proxmox credentials (default root@pam).</p>
-  <label id="lUser">User</label><input id="u" value="root@pam" autocomplete="username">
-  <label id="lPass">Password</label><input id="p" type="password" autocomplete="current-password">
+  <div id="pwStep">
+    <label id="lUser">User</label><input id="u" value="root@pam" autocomplete="username">
+    <label id="lPass">Password</label><input id="p" type="password" autocomplete="current-password">
+  </div>
+  <div id="tfaStep" style="display:none">
+    <label id="lCode">One-time code</label>
+    <input id="c" inputmode="numeric" autocomplete="one-time-code" placeholder="123456">
+    <p class="hint" id="tfaHint">Enter the 6-digit code from your authenticator app.</p>
+  </div>
   <button class="go" id="go">Log in</button>
   <div class="err" id="err"></div>
 </div>
 <script>
-const I18N={en:{title:'Log in with your Proxmox credentials (default root@pam).',user:'User',pass:'Password',go:'Log in'},
-  pl:{title:'Zaloguj się poświadczeniami Proxmoksa (domyślnie root@pam).',user:'Użytkownik',pass:'Hasło',go:'Zaloguj'}};
+const I18N={en:{title:'Log in with your Proxmox credentials (default root@pam).',user:'User',pass:'Password',go:'Log in',
+    code:'One-time code',tfaHint:'Enter the 6-digit code from your authenticator app (or a recovery code).',verify:'Verify',
+    tfaTitle:'Two-factor authentication required for this account.',badCode:'Wrong or expired code'},
+  pl:{title:'Zaloguj się poświadczeniami Proxmoksa (domyślnie root@pam).',user:'Użytkownik',pass:'Hasło',go:'Zaloguj',
+    code:'Kod jednorazowy',tfaHint:'Wpisz 6-cyfrowy kod z aplikacji uwierzytelniającej (lub kod odzyskiwania).',verify:'Zweryfikuj',
+    tfaTitle:'To konto wymaga uwierzytelniania dwuskładnikowego.',badCode:'Błędny lub wygasły kod'}};
 let LANG=localStorage.getItem('au_lang')||'en';
 function applyLang(l){LANG=l;localStorage.setItem('au_lang',l);document.documentElement.lang=l;
-  langBtn.textContent='🌐 '+l.toUpperCase();hint.textContent=I18N[l].title;lUser.textContent=I18N[l].user;
-  lPass.textContent=I18N[l].pass;go.textContent=I18N[l].go;}
+  langBtn.textContent='🌐 '+l.toUpperCase();hint.textContent=CH?I18N[l].tfaTitle:I18N[l].title;lUser.textContent=I18N[l].user;
+  lPass.textContent=I18N[l].pass;lCode.textContent=I18N[l].code;tfaHint.textContent=I18N[l].tfaHint;
+  go.textContent=CH?I18N[l].verify:I18N[l].go;}
 langBtn.onclick=()=>applyLang(LANG==='en'?'pl':'en');
 function applyTheme(th){document.documentElement.setAttribute('data-theme',th);localStorage.setItem('au_theme',th);themeBtn.textContent=th==='dark'?'☀️':'🌙';}
 themeBtn.onclick=()=>applyTheme(document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark');
 applyTheme(localStorage.getItem('au_theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'));
+let CH=null;                              // active TFA challenge (null = password step)
 applyLang(LANG);
 p.onkeydown=e=>{if(e.key==='Enter')go.click()};
+c.onkeydown=e=>{if(e.key==='Enter')go.click()};
+function toTfaStep(){CH&&(pwStep.style.display='none',tfaStep.style.display='',applyLang(LANG),c.value='',c.focus());}
 go.onclick=async()=>{err.textContent='';
-  const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({username:u.value.trim(),password:p.value})});
-  const d=await r.json(); if(r.ok)location.href='/'; else err.textContent=d.error||'error';
+  const payload=CH?{username:u.value.trim(),tfa_challenge:CH,code:c.value.trim()}
+                  :{username:u.value.trim(),password:p.value};
+  const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  const d=await r.json();
+  if(d.tfa){CH=d.challenge;toTfaStep();return;}   // password OK -> ask for the 2nd factor
+  if(r.ok&&d.ok){location.href='/';return;}
+  err.textContent=(CH?I18N[LANG].badCode:(d.error||'error'));
 };
 </script>
 </body>
