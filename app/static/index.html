@@ -562,7 +562,8 @@ let SET={},HU={},DATA={guests:[]},GDAY=null;
 const I18N={
   en:{whOk:'API OK',whApi:'API',whPve:'PVE API',whExec:'Executor',whInv:'Inventory',whAgo:'{a} ago',whNever:'never',
     whInvOk:'{g} guests · {w} windows',whInvNone:'empty',whFail:'error',whUnreach:'panel API unreachable',
-    whDegraded:'degraded — click for details',
+    whDegraded:'degraded — click for details',whInvAge:'inventory refreshed {a} ago — click for detail',
+    whCadence:'refresh: host ~5 min · backup coverage 1 h · panel 5 s',
     containers:'Containers',log:'Log',logout:'Log out',pause:'Pause',resume:'Resume',pauseTag:'PAUSED',linesLbl:'lines',
     logFilterPh:'filter text…',logCatAll:'All events',logCatAudit:'Audit (changes)',logCatTask:'Tasks',logCatError:'Errors / rollback',logCsv:'Export CSV',
     wizard:'Wizard',themeWord:'Theme',change:'Change',
@@ -642,7 +643,8 @@ const I18N={
     yes:'yes',no:'no'},
   pl:{whOk:'API OK',whApi:'API',whPve:'PVE API',whExec:'Executor',whInv:'Inventory',whAgo:'{a} temu',whNever:'nigdy',
     whInvOk:'{g} gości · {w} okien',whInvNone:'puste',whFail:'błąd',whUnreach:'API panelu nieosiągalne',
-    whDegraded:'ograniczone — kliknij po szczegóły',
+    whDegraded:'ograniczone — kliknij po szczegóły',whInvAge:'inventory odświeżone {a} temu — kliknij po szczegóły',
+    whCadence:'odświeżanie: host ~5 min · pokrycie backupem 1 h · panel 5 s',
     containers:'Kontenery',log:'Log',logout:'Wyloguj',pause:'Pauza',resume:'Wznów',pauseTag:'PAUZA',linesLbl:'linii',
     logFilterPh:'filtruj tekst…',logCatAll:'Wszystkie zdarzenia',logCatAudit:'Audyt (zmiany)',logCatTask:'Zadania',logCatError:'Błędy / rollback',logCsv:'Eksport CSV',
     wizard:'Kreator',themeWord:'Motyw',change:'Zmień',
@@ -852,7 +854,13 @@ function renderGantt(d){
   const G=WIZPREVIEW?previewGuests(d):(d.guests||[]);
   const dayCount={};
   for(const x of G){if(x.config.enabled&&x.config.mode==='calendar')dayCount[gwd(x)]=(dayCount[gwd(x)]||0)+1;}
-  let presentDays=Object.keys(dayCount).map(Number).sort((a,b)=>a-b);
+  // a night gets a tab if it has scheduled machines OR a backup window OR the host
+  // update — otherwise a backup that runs on a night with no LXC update (e.g. the Sat
+  // offsite job) would be unreachable in the week view.
+  const dset=new Set(Object.keys(dayCount).map(Number));
+  for(const w of (inv.windows||[]))if(w.days)w.days.forEach(dd=>dset.add(dd));
+  if(HU.enabled&&HU.mode==='calendar')(HU.weekdays||[]).forEach(dd=>dset.add(dd%7));
+  let presentDays=[...dset].sort((a,b)=>a-b);
   if(!presentDays.length)presentDays=((d.maintenance||{}).days||[6]).slice().sort((a,b)=>a-b);
   if(GDAY===null||!presentDays.includes(GDAY))
     GDAY=presentDays.reduce((a,b)=>((dayCount[b]||0)>(dayCount[a]||0)?b:a),presentDays[0]);
@@ -1031,12 +1039,15 @@ async function loadHealth(){
   const cls=!pveOk?'err':((execStale||invEmpty)?'warn':'ok');
   w.className='watch '+cls;
   el('watchTxt').textContent=cls==='ok'?t('whOk'):t('whApi');
+  const invAge=(h.inventory&&h.inventory.checked)?Math.max(0,Math.round((Date.now()-new Date(h.inventory.checked).getTime())/1000)):null;
   const line=(lbl,val,st)=>`<div class="wl"><span>${lbl}</span><span class="wv ${st}"><b>${val}</b></span></div>`;
   pop.innerHTML=
     line(t('whPve'),pveOk?`OK · ${h.pve.ms} ms`:(h.pve.error||t('whFail')),pveOk?'ok':'err')+
-    line(t('whExec'),execStale?t('whAgo',{a:fmtAge(execAge)}):t('whAgo',{a:fmtAge(execAge)}),execStale?'warn':'ok')+
-    line(t('whInv'),invEmpty?t('whInvNone'):t('whInvOk',{g:h.inventory.guests,w:h.inventory.windows}),invEmpty?'warn':'ok');
-  w.title=cls==='ok'?t('whOk'):(!pveOk?(h.pve.error||t('whFail')):t('whDegraded'));
+    line(t('whExec'),t('whAgo',{a:fmtAge(execAge)}),execStale?'warn':'ok')+
+    line(t('whInv'),invEmpty?t('whInvNone'):`${t('whInvOk',{g:h.inventory.guests,w:h.inventory.windows})} · ${t('whAgo',{a:fmtAge(invAge)})}`,invEmpty?'warn':(invAge!=null&&invAge>600?'warn':'ok'))+
+    `<div class="wl"><span class="muted" style="font-size:11px">${t('whCadence')}</span></div>`;
+  // hover tooltip on the pill itself: how fresh the inventory is
+  w.title=!pveOk?(h.pve.error||t('whFail')):(invEmpty?t('whDegraded'):t('whInvAge',{a:fmtAge(invAge)}));
 }
 el('watch').onclick=()=>{el('watch').parentElement.classList.toggle('open');};
 document.addEventListener('click',e=>{const ww=el('watch').parentElement;if(ww.classList.contains('open')&&!ww.contains(e.target))ww.classList.remove('open');});
