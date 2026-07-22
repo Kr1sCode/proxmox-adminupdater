@@ -12,15 +12,25 @@ it reuses the same config/schedule/UI lineage.
 
 ## Screenshots
 
-**Service window** — the mission-control view, now a **week view**. Day tabs (each
-night with its machine count) let you drill into any night; the two anchors (the
-daily backup window in red, the PVE host update in amber) and **other scheduled host
-maintenance** that competes for disk IO — ZFS scrub/trim, mdadm check, e2scrub,
-fstrim, unattended apt, offsite backups — are drawn per-night as read-only rows you
-can one-click "avoid", with each enrolled LXC laid out around them (snapshot → update
-→ prune, time, retention). EN/PL and light/dark built in.
+**Service window** — the mission-control view, a full **week view** (Mon–Sun tabs,
+each with its LXC-update count). The anchors are drawn to scale from real data: every
+detected **backup window** in red — its true duration learned from the PVE task
+history, so a job that runs 23:00→01:22 across midnight blocks the whole span — and
+the **PVE host update** in amber. **Other scheduled host maintenance** competing for
+disk IO (ZFS scrub/trim, mdadm check, e2scrub, fstrim, unattended apt, offsite
+backups) shows per-night as read-only rows you can one-click "avoid". Each enrolled
+LXC is laid out around them (snapshot → update → prune, time, retention). A live
+API/executor watchdog and refresh-cadence counters sit in the header. EN/PL and
+light/dark built in.
 
 ![Service window](docs/dashboard-service-window.png)
+
+**Every night, even the quiet ones** — pick any night to see exactly what touches
+the disks then. Here Sunday has no backup and no LXC updates, so it is the calmest
+window; the amber column is the host update, and the grey/host-maintenance ticks are
+the only competition. Nothing is hidden just because it is empty.
+
+![Week view — a quiet night](docs/dashboard-week-quiet.png)
 
 **LXC machines** — the fleet table: per-guest backup freshness, snapshot count,
 update scope + health-check, its scheduled **night + time**, and one-click Snapshot /
