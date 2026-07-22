@@ -53,6 +53,14 @@
   .watchpop .wl:last-child{border-bottom:0}
   .watchpop .wl b{font-family:var(--mono);font-weight:600}
   .watchpop .wv.ok{color:var(--good)}.watchpop .wv.warn{color:var(--warn)}.watchpop .wv.err{color:var(--crit)}
+  /* at-a-glance refresh-cadence counters next to the watchdog */
+  .cadence{display:flex;gap:5px;align-items:center}
+  .cad{font-family:var(--mono);font-size:10.5px;color:var(--ink-mute);padding:2px 7px;border-radius:99px;
+       border:1px solid var(--border-soft);white-space:nowrap;cursor:default}
+  .cad b{color:var(--ink-dim);font-weight:600}
+  .cad.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,var(--border))}
+  .cad.warn b{color:var(--warn)}
+  @media(max-width:1180px){.cadence{display:none}}
   .sp{flex:1}
   button{font:inherit}
   .btn{font-size:13px;color:var(--ink);background:var(--surface);border:1px solid var(--border);
@@ -291,6 +299,11 @@
 <div class="cmd">
   <div class="brand"><span class="logo"><span class="brandic" data-ic="shield"></span> adminupdater</span><span class="node mono" id="nodeName"></span></div>
   <div class="watchwrap"><button class="watch wait" id="watch" title=""><span class="dot"></span><span id="watchTxt">API</span></button><div class="watchpop" id="watchPop"></div></div>
+  <div class="cadence" id="cadence">
+    <span class="cad" id="cadInv" title=""></span>
+    <span class="cad" id="cadCov" title=""></span>
+    <span class="cad" id="cadUi" title=""></span>
+  </div>
   <span id="pausewrap"></span>
   <span class="sp"></span>
   <button class="btn ghost" id="openWiz"><span data-ic="wand"></span> <span data-i18n="wizard">Wizard</span></button>
@@ -564,6 +577,9 @@ const I18N={
     whInvOk:'{g} guests · {w} windows',whInvNone:'empty',whFail:'error',whUnreach:'panel API unreachable',
     whDegraded:'degraded — click for details',whInvAge:'inventory refreshed {a} ago — click for detail',
     whCadence:'refresh: host ~5 min · backup coverage 1 h · panel 5 s',
+    cadInvTip:'Host inventory (jobs.cfg · host jobs · guests) — refreshed ~every 5 min · last {a} ago',
+    cadCovTip:'Backup coverage (pvesm over the network) — cached 1 h',
+    cadUiTip:'Dashboard auto-refresh — every 5 s (60 s while the wizard is open)',
     containers:'Containers',log:'Log',logout:'Log out',pause:'Pause',resume:'Resume',pauseTag:'PAUSED',linesLbl:'lines',
     logFilterPh:'filter text…',logCatAll:'All events',logCatAudit:'Audit (changes)',logCatTask:'Tasks',logCatError:'Errors / rollback',logCsv:'Export CSV',
     wizard:'Wizard',themeWord:'Theme',change:'Change',
@@ -645,6 +661,9 @@ const I18N={
     whInvOk:'{g} gości · {w} okien',whInvNone:'puste',whFail:'błąd',whUnreach:'API panelu nieosiągalne',
     whDegraded:'ograniczone — kliknij po szczegóły',whInvAge:'inventory odświeżone {a} temu — kliknij po szczegóły',
     whCadence:'odświeżanie: host ~5 min · pokrycie backupem 1 h · panel 5 s',
+    cadInvTip:'Inventory hosta (jobs.cfg · zadania hosta · goście) — odświeżane ~co 5 min · ostatnio {a} temu',
+    cadCovTip:'Pokrycie backupem (pvesm po sieci) — cache 1 h',
+    cadUiTip:'Auto-odświeżanie panelu — co 5 s (60 s w kreatorze)',
     containers:'Kontenery',log:'Log',logout:'Wyloguj',pause:'Pauza',resume:'Wznów',pauseTag:'PAUZA',linesLbl:'linii',
     logFilterPh:'filtruj tekst…',logCatAll:'Wszystkie zdarzenia',logCatAudit:'Audyt (zmiany)',logCatTask:'Zadania',logCatError:'Błędy / rollback',logCsv:'Eksport CSV',
     wizard:'Kreator',themeWord:'Motyw',change:'Zmień',
@@ -732,6 +751,7 @@ function applyLang(l){
   document.querySelectorAll('[data-i18n-ph]').forEach(n=>n.placeholder=t(n.dataset.i18nPh));
   render();if(!el('wiz').hidden)renderWiz();
   if(el('nPreview'))renderNotifyPreview();
+  if(el('cadInv'))renderCadence();
 }
 el('langBtn').onclick=()=>applyLang(LANG==='en'?'pl':'en');
 el('wizLang').onclick=()=>applyLang(LANG==='en'?'pl':'en');
@@ -1022,6 +1042,7 @@ async function load(){
 }
 
 // ---------- watchdog: PVE-API + executor heartbeat ----------
+let INV_CHECKED=null;   // epoch ms of the last host inventory push (for the live counter)
 function fmtAge(s){if(s==null)return t('whNever');if(s<90)return s+' s';if(s<5400)return Math.round(s/60)+' min';return Math.round(s/3600)+' h';}
 async function loadHealth(){
   let h;try{h=await fetch('/api/health').then(r=>r.json());}catch(e){h=null;}
@@ -1035,7 +1056,9 @@ async function loadHealth(){
   const cls=!pveOk?'err':((execStale||invEmpty)?'warn':'ok');
   w.className='watch '+cls;
   el('watchTxt').textContent=cls==='ok'?t('whOk'):t('whApi');
-  const invAge=(h.inventory&&h.inventory.checked)?Math.max(0,Math.round((Date.now()-new Date(h.inventory.checked).getTime())/1000)):null;
+  INV_CHECKED=(h.inventory&&h.inventory.checked)?new Date(h.inventory.checked).getTime():null;
+  const invAge=INV_CHECKED!=null?Math.max(0,Math.round((Date.now()-INV_CHECKED)/1000)):null;
+  tickCadence();
   const line=(lbl,val,st)=>`<div class="wl"><span>${lbl}</span><span class="wv ${st}"><b>${val}</b></span></div>`;
   pop.innerHTML=
     line(t('whPve'),pveOk?`OK · ${h.pve.ms} ms`:(h.pve.error||t('whFail')),pveOk?'ok':'err')+
@@ -1048,6 +1071,21 @@ async function loadHealth(){
 el('watch').onclick=()=>{el('watch').parentElement.classList.toggle('open');};
 document.addEventListener('click',e=>{const ww=el('watch').parentElement;if(ww.classList.contains('open')&&!ww.contains(e.target))ww.classList.remove('open');});
 setInterval(loadHealth,30000);
+// at-a-glance refresh-cadence counters: inv = live inventory age (host pushes ~5 min),
+// cov/panel = the fixed cadences. Ticks locally each second between health polls.
+function renderCadence(){
+  el('cadCov').innerHTML='cov&nbsp;<b>1h</b>';el('cadCov').title=t('cadCovTip');
+  el('cadUi').innerHTML='panel&nbsp;<b>5s</b>';el('cadUi').title=t('cadUiTip');
+  tickCadence();
+}
+function tickCadence(){
+  const c=el('cadInv');if(!c)return;
+  const age=INV_CHECKED!=null?Math.max(0,Math.round((Date.now()-INV_CHECKED)/1000)):null;
+  c.innerHTML='inv&nbsp;<b>'+(age!=null?fmtAge(age):'—')+'</b>';
+  c.className='cad'+(age!=null&&age>600?' warn':'');
+  c.title=t('cadInvTip',{a:age!=null?fmtAge(age):t('whNever')});
+}
+setInterval(tickCadence,1000);
 
 // ---------- ad-hoc actions ----------
 async function postAction(action,vmids){
