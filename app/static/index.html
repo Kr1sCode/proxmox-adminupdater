@@ -75,6 +75,8 @@
   nav button{background:transparent;border:0;border-bottom:2px solid transparent;color:var(--ink-dim);
              padding:6px 10px;cursor:pointer;font-size:13px}
   nav button.active{border-bottom-color:var(--accent);color:var(--ink);font-weight:600}
+  /* while the wizard is docked, the other tabs are locked (service window only) */
+  body.wiz-open nav .tab:not(.active){opacity:.38;pointer-events:none;cursor:not-allowed}
 
   main{flex:1;min-height:0;overflow-y:auto;padding:6px 0 40px}
   .wrap{max-width:1560px;margin:0 auto;padding:12px 28px}
@@ -489,9 +491,9 @@
     <div class="row" style="margin-top:.2rem"><input type="checkbox" id="hEnabled"><label style="margin:0" data-i18n="hEnabled">Enable scheduled host update</label></div>
     <label data-i18n="schedMode">Schedule mode</label>
     <select id="hMode"><option value="calendar" data-i18n="calendar">Calendar (days/time)</option><option value="interval" data-i18n="interval">Interval</option></select>
-    <div id="hCal" class="grid2">
-      <div><label class="thin" data-i18n="timeLbl">Time (HH:MM)</label><input type="text" id="hTime" value="02:00"></div>
-      <div><label class="thin" data-i18n="daysLbl">Days (0=Mon…6=Sun, empty=daily)</label><input type="text" id="hDays" value="5"></div>
+    <div id="hCal">
+      <label class="thin" data-i18n="timeLbl">Time (HH:MM)</label><input type="text" id="hTime" value="02:00" style="max-width:160px">
+      <label class="thin" data-i18n="wizHostDays">Day(s) of the host update</label><div id="hDays" class="daypick"></div>
     </div>
     <div id="hInt" style="display:none"><label data-i18n="everyMinLbl">Every N minutes</label><input type="number" id="hInterval" value="10080"></div>
     <p class="muted" style="font-size:.8rem;margin-top:.6rem" data-i18n="hostNote">The command is defined host-side (host.conf → host_update_cmd) and needs host_update=on there.</p>
@@ -566,15 +568,16 @@ const I18N={
     thName:'Machine',thSystem:'System',thBackup:'Backup',thSnaps:'Snapshots',thSchedule:'Schedule',thScope:'Scope + health',thLast:'Last',
     edit:'Edit',disabled:'disabled',allDays:'daily',paused:'paused',
     refresh:'Refresh',autoLbl:'auto (5 s)',logMeta:'last 200 lines',empty:'(empty)',
-    ribbonTitle:'Service window',ribbonHint:'— the two anchors: the host update and its backup window; LXCs are laid out around them',
+    ribbonTitle:'Service window',ribbonHint:'— backup windows (red) and the host update (amber) are fixed; LXC updates are laid out around them',
+    ganttNoneTonight:'no backup this night',
     legBackup:'Backup (never schedule here)',legHost:'Host update',legGuest:'LXC update',legSnap:'Snapshot: create → prune',legMaint:'Host maintenance (disk IO)',
     ganttAvoid:'avoid this window (make it a forbidden zone)',ganttUnavoid:'stop avoiding this window',
     wizHostJobsTitle:'Other scheduled activity on the host',wizHostJobsNote:'Read-only — these compete for the host disks. On the timeline you can mark any of them “avoid” so updates keep clear.',wizHostJobsLight:'…and {n} light task(s).',wizHostJobsNone:'No heavy host maintenance detected.',
     windowTab:'Service window',machinesTitle:'LXC machines',rowHint:'click = details / policy',
     ganttBackup:'Backup window',ganttDaily:'daily',ganttHostRow:'Host update',ganttNoSched:'not scheduled',ganttOffWindow:'outside the night window',ganttConflict:'overlaps a forbidden slot — re-run Plan schedule',
     ganttSnapC:'📷 snapshot',ganttSnapP:'🗑 prune',ganttNoEnabled:'No LXC has an update schedule yet — use “Plan schedule”.',
-    wizHostTitle:'PVE host update (the second anchor)',wizHostEnable:'Update the PVE host on a schedule',
-    wizHostNote:'When the host itself updates. If it shares the LXC day the planner keeps machines clear of it; the command stays host-side (host.conf).',
+    wizHostTitle:'Update the PVE host itself',wizHostEnable:'Update the PVE host on a schedule',wizHostDays:'Day(s) of the host update',
+    wizHostNote:'adminupdater runs this itself on the host (apt upgrade from host.conf → host_update_cmd, needs host_update=on) — it is not a third-party script. It shows as the amber row in the service window below; on a shared night the planner keeps LXC updates clear of it.',
     kManaged:'Managed',kManagedS:'of {n} LXC on host',kCurrent:'Up to date',kCurrentS:'after last run',
     kPending:'Pending',kPendingS:'scheduled soon',kProblems:'Problems',kProblemsS:'rollback / health-check',
     kCoverage:'Backup coverage',kCoverageS:'{a} / {b} have a fresh copy',kNext:'Next run',kNextS:'{n} machines',kNextNone:'no run',
@@ -619,7 +622,7 @@ const I18N={
     wizEyebrow:'Wizard · first run',wizTitle:"Let's schedule safe updates for your fleet",wizClose:'Close (finish later)',wizBack:'Back',wizFinish:'Finish',
     st1:'1 · Scan',st2:'2 · Machines',st3:'3 · Schedule',st4:'4 · Scope + health',st5:'5 · Notifications',
     wizScanLead:'I scanned host {n}. Here is what I found:',scLxc:'LXC containers',scFresh:'have a fresh backup (< {h} h)',scSnaps:'snapshots total',scNoBk:'with no backup at all — risk',
-    wizWinFound:'Detected backup window {w}',wizAvoiding:'avoiding this window',wizWinNone:'No backup job detected yet — the host learns windows from real backups.',
+    wizWinFound:'Detected backup window {w}',wizWinFoundN:'Detected {n} backup window(s) — avoiding all of them',wizAvoiding:'avoiding this window',wizWinNone:'No backup job detected yet — the host learns windows from real backups.',
     wizNoBkList:'No backup — kept out of auto-update',wizNoBkNote:"I won't auto-update machines without a copy. You can enable them consciously.",
     next2:'Next: backup coverage →',next3:'Next: schedule →',next4:'Next: scope + health →',next5:'Next: notifications →',
     wizCovLead:'Every machine is enrolled by default — untick any you do NOT want the update schedule to cover. Machines without a fresh backup are flagged, but a pre-update snapshot is always taken regardless.',
@@ -645,15 +648,16 @@ const I18N={
     thName:'Maszyna',thSystem:'System',thBackup:'Backup',thSnaps:'Migawki',thSchedule:'Harmonogram',thScope:'Zakres + health',thLast:'Ostatnio',
     edit:'Edytuj',disabled:'wyłączony',allDays:'codz.',paused:'pauza',
     refresh:'Odśwież',autoLbl:'auto (5 s)',logMeta:'ostatnie 200 linii',empty:'(pusto)',
-    ribbonTitle:'Okno serwisowe',ribbonHint:'— dwa filary: aktualizacja hosta i jego okno backupu; LXC układane wokół nich',
+    ribbonTitle:'Okno serwisowe',ribbonHint:'— okna backupu (czerwone) i aktualizacja hosta (pomarańczowa) są stałe; aktualizacje LXC układane są wokół nich',
+    ganttNoneTonight:'brak backupu tej nocy',
     legBackup:'Backup (nie planuj tu aktualizacji)',legHost:'Aktualizacja hosta',legGuest:'Aktualizacja LXC',legSnap:'Migawka: utworzenie → prune',legMaint:'Konserwacja hosta (IO dysków)',
     ganttAvoid:'omijaj to okno (zrób z niego strefę zakazaną)',ganttUnavoid:'przestań omijać to okno',
     wizHostJobsTitle:'Inne zaplanowane zadania na hoście',wizHostJobsNote:'Tylko podgląd — konkurują o dyski hosta. Na osi czasu możesz oznaczyć dowolne „omijaj", by aktualizacje trzymały się z dala.',wizHostJobsLight:'…oraz {n} lekkich zadań.',wizHostJobsNone:'Nie wykryto ciężkiej konserwacji hosta.',
     windowTab:'Okno serwisowe',machinesTitle:'Maszyny LXC',rowHint:'klik = szczegóły / edycja polityki',
     ganttBackup:'Okno backupu',ganttDaily:'codziennie',ganttHostRow:'Aktualizacja hosta',ganttNoSched:'brak harmonogramu',ganttOffWindow:'poza oknem nocnym',ganttConflict:'nachodzi na strefę zakazaną — uruchom ponownie Zaplanuj harmonogram',
     ganttSnapC:'📷 migawka',ganttSnapP:'🗑 prune',ganttNoEnabled:'Żaden LXC nie ma jeszcze harmonogramu — użyj „Zaplanuj harmonogram".',
-    wizHostTitle:'Aktualizacja hosta PVE (drugi filar)',wizHostEnable:'Aktualizuj hosta PVE wg harmonogramu',
-    wizHostNote:'Kiedy aktualizuje się sam host. Jeśli to ten sam dzień co LXC, planer trzyma maszyny z dala od tego slotu; komenda pozostaje po stronie hosta (host.conf).',
+    wizHostTitle:'Aktualizacja samego hosta PVE',wizHostEnable:'Aktualizuj hosta PVE wg harmonogramu',wizHostDays:'Dzień(dni) aktualizacji hosta',
+    wizHostNote:'adminupdater robi to sam na hoście (apt upgrade z host.conf → host_update_cmd, wymaga host_update=on) — to NIE zewnętrzny skrypt. Pokazuje się jako pomarańczowy wiersz w oknie serwisowym poniżej; w tę samą noc planer trzyma aktualizacje LXC z dala od tego slotu.',
     kManaged:'Zarządzane',kManagedS:'z {n} LXC na hoście',kCurrent:'Aktualne',kCurrentS:'po ostatnim runie',
     kPending:'Oczekują',kPendingS:'zaplanowane wkrótce',kProblems:'Problemy',kProblemsS:'rollback / health-check',
     kCoverage:'Pokrycie backupem',kCoverageS:'{a} / {b} ma świeżą kopię',kNext:'Najbliższy run',kNextS:'{n} maszyn',kNextNone:'brak runu',
@@ -697,7 +701,7 @@ const I18N={
     wizEyebrow:'Kreator · pierwsze uruchomienie',wizTitle:'Ułóżmy bezpieczne aktualizacje Twojej floty',wizClose:'Zamknij (dokończę później)',wizBack:'Wstecz',wizFinish:'Zakończ',
     st1:'1 · Skan',st2:'2 · Maszyny',st3:'3 · Harmonogram',st4:'4 · Zakres + health',st5:'5 · Powiadomienia',
     wizScanLead:'Przeskanowałem hosta {n}. Oto co znalazłem:',scLxc:'kontenerów LXC',scFresh:'ma świeży backup (< {h} h)',scSnaps:'migawek łącznie',scNoBk:'bez żadnej kopii — ryzyko',
-    wizWinFound:'Wykryto okno backupu {w}',wizAvoiding:'omijam to okno',wizWinNone:'Nie wykryto jeszcze zadania backupu — host uczy się okien z realnych kopii.',
+    wizWinFound:'Wykryto okno backupu {w}',wizWinFoundN:'Wykryto {n} okien backupu — omijam wszystkie',wizAvoiding:'omijam to okno',wizWinNone:'Nie wykryto jeszcze zadania backupu — host uczy się okien z realnych kopii.',
     wizNoBkList:'Brak backupu — pomijam z auto-update',wizNoBkNote:'Nie planuję automatycznych aktualizacji maszyn bez kopii. Możesz włączyć świadomie.',
     next2:'Dalej: pokrycie backupem →',next3:'Dalej: harmonogram →',next4:'Dalej: zakres + health →',next5:'Dalej: powiadomienia →',
     wizCovLead:'Domyślnie objęte są WSZYSTKIE maszyny — odznacz te, których harmonogram aktualizacji ma NIE obejmować. Maszyny bez świeżej kopii są oznaczone, ale migawka przed aktualizacją i tak jest zawsze robiona.',
@@ -740,6 +744,16 @@ applyTheme(localStorage.getItem('au_theme')||'dark');
 let logTimer=null,guestsTimer=null;
 function startGuestsAuto(){stopGuestsAuto();guestsTimer=setInterval(()=>{if(!el('dlg').open&&el('wiz').hidden)load();},5000);}
 function stopGuestsAuto(){if(guestsTimer){clearInterval(guestsTimer);guestsTimer=null;}}
+// while the wizard is open, keep the inventory (backup windows, host-maintenance,
+// coverage) fresh in the background and re-paint the service window + the scan step,
+// WITHOUT touching the wizard form (WSEL, day-pickers, inputs stay intact)
+let wizRefreshTimer=null;
+function startWizRefresh(){stopWizRefresh();wizRefreshTimer=setInterval(async()=>{
+  if(el('wiz').hidden||el('dlg').open)return;
+  try{const d=await fetch('/api/guests').then(r=>r.json());SET=d.settings||{};HU=d.host_update||{};DATA=d;
+    render();if(WSTEP===1)renderWiz();}catch(e){}
+},60000);}
+function stopWizRefresh(){if(wizRefreshTimer){clearInterval(wizRefreshTimer);wizRefreshTimer=null;}}
 document.querySelectorAll('nav .tab').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('nav .tab').forEach(x=>x.classList.toggle('active',x===b));
   document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('active',p.id==='pane-'+b.dataset.tab));
@@ -864,11 +878,12 @@ function renderGantt(d){
   const track=inner=>`<div class="gtrack">${bands}${inner}</div>`;
 
   let html='';
-  // --- anchor row 1: the backup window(s) active on the viewed night ---
-  const bw=dayWins[0];
-  html+=`<div class="grow ref"><div class="glabel"><span class="nm">${ic('database','crit')} ${t('ganttBackup')}</span><span class="day">${bw?(bw.days?wdList(bw.days):t('ganttDaily')):t('ganttDaily')}</span></div>`+
-    track(bw?`<div class="gbar backupbar" style="left:${ribPct(bw.start_min)}%;width:${Math.max(6,mPct((((bw.end_min-bw.start_min)%1440)+1440)%1440))}%">${fmtMin(bw.start_min)}–${fmtMin(bw.end_min)}</div>`
-            :`<span class="gempty">${t('noWindows')}</span>`)+`</div>`;
+  // --- anchor row 1: the backup window(s) that actually run on the viewed night ---
+  const bwBars=dayWins.filter(w=>inAxis(w.start_min)||inAxis(w.end_min))
+    .map(w=>`<div class="gbar backupbar" style="left:${ribPct(w.start_min)}%;width:${Math.max(6,mPct((((w.end_min-w.start_min)%1440)+1440)%1440))}%">${fmtMin(w.start_min)}–${fmtMin(w.end_min)}</div>`).join('');
+  const bwDayLbl=dayWins.length?(dayWins[0].days?wdList(dayWins[0].days):t('ganttDaily')):'—';
+  html+=`<div class="grow ref"><div class="glabel"><span class="nm">${ic('database','crit')} ${t('ganttBackup')}</span><span class="day">${bwDayLbl}</span></div>`+
+    track(bwBars||`<span class="gempty">${(inv.windows||[]).length?t('ganttNoneTonight'):t('noWindows')}</span>`)+`</div>`;
 
   // --- anchor row 2: the host update ---
   html+=`<div class="grow ref"><div class="glabel"><span class="nm">${ic('shield','warn')} ${t('ganttHostRow')}</span><span class="day">${hostM!=null?wdList(HU.weekdays||[]):t('ganttNoSched')}</span></div>`+
@@ -1046,14 +1061,14 @@ el('bulkPurge').onclick=()=>{const v=allVmids();if(v.length&&confirm(t('confirmP
 
 // ---------- host update dialog ----------
 function openHost(){el('hEnabled').checked=!!HU.enabled;el('hMode').value=HU.mode||'calendar';
-  el('hTime').value=(HU.times||['02:00'])[0];el('hDays').value=(HU.weekdays||[]).join(',');
+  el('hTime').value=(HU.times||['02:00'])[0];fillDayPick('hDays',(HU.weekdays&&HU.weekdays.length)?HU.weekdays:[5]);
   el('hInterval').value=HU.interval_minutes||10080;toggleHostMode();el('hdlg').showModal();}
 function toggleHostMode(){const cal=el('hMode').value==='calendar';el('hCal').style.display=cal?'':'none';el('hInt').style.display=cal?'none':'';}
 el('hMode').onchange=toggleHostMode;
 el('hSave').onclick=async()=>{
   await fetch('/api/host-update',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({enabled:el('hEnabled').checked,mode:el('hMode').value,times:[el('hTime').value.trim()],
-      weekdays:el('hDays').value.split(',').map(x=>x.trim()).filter(x=>x!=='').map(Number),
+      weekdays:readDayPick('hDays'),
       interval_minutes:+el('hInterval').value||10080})});
   el('hdlg').close();load();};
 el('hostbar').onclick=openHost;
@@ -1263,10 +1278,12 @@ function openWizard(){
   el('wiz').hidden=false;
   renderWiz();bootIcons(el('wiz'));
   render();                               // refresh the timeline underneath
+  startWizRefresh();                      // keep inventory live in the background
   const m=document.querySelector('main'); if(m)m.scrollTop=0;
 }
 function closeWizard(done){
   if(done)localStorage.setItem('au_wizard_done','1');
+  stopWizRefresh();
   el('wiz').hidden=true;document.body.classList.remove('wiz-open');
   WIZPREVIEW=null;render();               // drop the preview, back to the real saved schedule
   startGuestsAuto();
@@ -1295,7 +1312,7 @@ async function applyWizHost(){
   if(!el('wHostEn'))return;
   const body={enabled:el('wHostEn').checked,mode:'calendar',
     times:[el('wHostTime').value.trim()||'02:00'],
-    weekdays:[Math.max(0,Math.min(6,+el('wHostDay').value||5))],interval_minutes:10080};
+    weekdays:(readDayPick('wHostDays').length?readDayPick('wHostDays'):[5]),interval_minutes:10080};
   HU=body;
   await fetch('/api/host-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 }
@@ -1329,7 +1346,7 @@ function renderWiz(){
   const freshH=SET.backup_fresh_hours||24;
   const node=(DATA.host&&DATA.host.pve)?DATA.host.pve:'PVE';
   if(WSTEP===1){
-    const win=(inv.windows||[])[0];
+    const wins=inv.windows||[];
     b.innerHTML=`<p style="color:var(--ink-dim)">${t('wizScanLead',{n:`<b class="mono">${node}</b>`})}</p>
       <div class="scan">
         <div class="scancard"><div class="n mono">${total}</div><div class="l">${t('scLxc')}</div></div>
@@ -1337,7 +1354,8 @@ function renderWiz(){
         <div class="scancard"><div class="n mono">${snapsTotal}</div><div class="l">${t('scSnaps')}</div></div>
         <div class="scancard"><div class="n mono" style="color:${noBk.length?'var(--crit)':'var(--good)'}">${noBk.length}</div><div class="l">${t('scNoBk')}</div></div>
       </div>
-      ${win?`<div class="prop"><div class="row"><b>${t('wizWinFound',{w:fmtMin(win.start_min)+'–'+fmtMin(win.end_min)})}</b><span class="toggle">${t('wizAvoiding')}</span></div>
+      ${wins.length?`<div class="prop"><div class="row"><b>${t('wizWinFoundN',{n:wins.length})}</b><span class="toggle">${t('wizAvoiding')}</span></div>
+        <div class="covlist" style="margin-top:.5rem">${wins.map(w=>`<div class="r"><span>${ic('database','crit')} <b class="mono">${fmtMin(w.start_min)}–${fmtMin(w.end_min)}</b> <span class="muted">${w.days?wdList(w.days):t('ganttDaily')}</span></span><span class="muted mono">${w.storage||''}</span></div>`).join('')}</div>
         <div class="note">${t('ribbonHint').replace(/^—\s*/,'')}</div></div>`
       :`<div class="prop"><div class="note">${t('wizWinNone')}</div></div>`}
       ${noBk.length?`<div class="prop"><div class="row"><b>${noBk.map(x=>x.name+' ('+x.vmid+')').join(', ')}</b><span class="toggle" style="color:var(--warn);background:var(--warn-bg)">${t('wizNoBkList')}</span></div><div class="note">${t('wizNoBkNote')}</div></div>`:''}
@@ -1357,8 +1375,8 @@ function renderWiz(){
       <div class="prop" style="background:linear-gradient(90deg,var(--warn-bg),transparent 70%)">
         <label style="margin-top:0">${ic('shield','warn')} ${t('wizHostTitle')}</label>
         <div class="row" style="margin-top:.2rem;justify-content:flex-start"><input type="checkbox" id="wHostEn"><label style="margin:0">${t('wizHostEnable')}</label></div>
-        <div class="grid2"><div><label class="thin">${t('timeLbl')}</label><input type="text" id="wHostTime"></div>
-        <div><label class="thin">${t('maintDay')}</label><input type="number" id="wHostDay" min="0" max="6"></div></div>
+        <label class="thin">${t('timeLbl')}</label><input type="text" id="wHostTime" style="max-width:160px">
+        <label class="thin">${t('wizHostDays')}</label><div id="wHostDays" class="daypick"></div>
         <p class="note" style="margin-bottom:0">${t('wizHostNote')}</p>
       </div>
       <label style="margin-top:.8rem">${t('wizLxcWindow')}</label>
@@ -1371,7 +1389,7 @@ function renderWiz(){
       <div id="wPreview" style="margin-top:.8rem"></div>`;
     el('wHostEn').checked=!!HU.enabled;
     el('wHostTime').value=(HU.times||['02:00'])[0];
-    el('wHostDay').value=(HU.weekdays&&HU.weekdays.length)?HU.weekdays[0]:5;
+    fillDayPick('wHostDays',(HU.weekdays&&HU.weekdays.length)?HU.weekdays:[5]);
     fillDayPick('wDays',(DATA.maintenance||{}).days||[6]);
     el('wPropose').onclick=async()=>{
       el('mStart').value=el('wStart').value;el('mEnd').value=el('wEnd').value;el('mSpace').value=el('wSpace').value;

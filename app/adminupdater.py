@@ -535,28 +535,35 @@ def time_in_backup_window(cfg, hhmm, inv=None):
     return None
 
 
-def _place_one(lanes, ws, we, conc, spacing, zones):
-    """Place ONE item into the earliest free lane of a night; return its minute or
-    None if the night is full. Mutates lanes."""
+def _place_one(lanes, ws, we_lin, conc, spacing, zones):
+    """Place ONE item into the earliest free lane of a night; return its LINEAR minute
+    (>= 1440 when it lands after midnight) or None if the night is full. Works in a
+    linear timeline [ws, we_lin) so a window that crosses midnight (e.g. 23:30->05:00,
+    we_lin = 05:00 + 1440) is handled; zone tests use the wall-clock minute (cur % 1440).
+    Mutates lanes."""
     for _ in range(conc):
         li = min(range(conc), key=lambda i: lanes[i])   # earliest-free lane
         cur = lanes[li]
-        z = _in_zone(cur, zones)
-        while z and cur < we:                            # jump past forbidden zones
-            cur = z[1]
-            z = _in_zone(cur, zones)
-        if cur is not None and cur < we and not _in_zone(cur, zones):
+        guard = 0
+        while cur < we_lin and guard < 96:               # jump past forbidden zones
+            z = _in_zone(cur % 1440, zones)
+            if not z:
+                break
+            adv = (z[1] - (cur % 1440) + 1440) % 1440     # distance forward to the zone end
+            cur += adv or 1
+            guard += 1
+        if cur < we_lin and not _in_zone(cur % 1440, zones):
             lanes[li] = cur + spacing
             return cur
-        lanes[li] = we                                   # this lane is full
+        lanes[li] = we_lin                               # this lane is full
     return None
 
 
-def _night_capacity(ws, we, conc, spacing, zones):
+def _night_capacity(ws, we_lin, conc, spacing, zones):
     """How many placements fit in one night (used for ranking + the capacity meter)."""
     lanes, n = [ws] * conc, 0
     while n < 1000:
-        if _place_one(lanes, ws, we, conc, spacing, zones) is None:
+        if _place_one(lanes, ws, we_lin, conc, spacing, zones) is None:
             break
         n += 1
     return n
@@ -581,7 +588,10 @@ def propose_schedule(cfg, vmids=None):
         vmids = sorted((v for v in names if guest_backup_fresh(v, inv, fh, now)), key=int)
     vmids = [str(v) for v in vmids]
 
-    if ws is None or we is None or we <= ws:
+    # a window whose end is <= start crosses midnight -> extend it past 24:00 so the
+    # night is one continuous span (23:30->05:00 becomes [1410, 1740)).
+    we_lin = we if (we is not None and ws is not None and we > ws) else (we + 1440 if we is not None else None)
+    if ws is None or we is None or we_lin <= ws:
         return {"maintenance": m, "days": days, "plan": [], "per_day": [],
                 "unplaceable": [int(v) for v in vmids],
                 "capacity": {"slots_per_week": 0, "requested": len(vmids), "placed": 0}}
@@ -591,7 +601,7 @@ def propose_schedule(cfg, vmids=None):
     for d in days:
         z = day_zones(cfg, inv, d)
         nights.append({"weekday": d, "zones": z, "lanes": [ws] * conc,
-                       "cap": _night_capacity(ws, we, conc, spacing, z), "placed": []})
+                       "cap": _night_capacity(ws, we_lin, conc, spacing, z), "placed": []})
     # quietest (most free) nights first
     order = sorted(range(len(nights)), key=lambda i: -nights[i]["cap"])
 
@@ -600,10 +610,13 @@ def propose_schedule(cfg, vmids=None):
         placed = False
         for k in range(len(order)):
             night = nights[order[(di + k) % len(order)]]
-            slot = _place_one(night["lanes"], ws, we, conc, spacing, night["zones"])
+            slot = _place_one(night["lanes"], ws, we_lin, conc, spacing, night["zones"])
             if slot is not None:
                 night["placed"].append(v)
-                assign[v] = (night["weekday"], slot)
+                # a slot past midnight belongs to the NEXT calendar day
+                awd = (night["weekday"] + (1 if slot >= 1440 else 0)) % 7
+                assign[v] = (awd, slot % 1440)
+                night["cross"] = night.get("cross") or slot >= 1440
                 di = (di + k + 1) % len(order)
                 placed = True
                 break
