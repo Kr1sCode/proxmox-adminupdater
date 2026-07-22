@@ -250,10 +250,22 @@
   .daytab .cnt{color:var(--ink-mute);font-size:11px}.daytab.on .cnt{color:var(--accent)}
 
   /* wizard: wide + fixed height so it never re-centres between steps, single scroll */
-  #wiz{max-width:min(1040px,92vw);width:90vw}
-  #wiz[open]{display:flex;flex-direction:column;height:84vh;max-height:84vh}
+  /* wizard: a sheet DOCKED to the top of the content, so the real service-window
+     timeline stays visible below and updates live as the plan is proposed */
+  #wiz.wizdock{position:sticky;top:0;z-index:30;background:var(--surface);
+     border-bottom:1px solid var(--border);box-shadow:0 16px 32px -14px rgba(3,8,18,.55);
+     display:flex;flex-direction:column;max-height:58vh}
+  #wiz.wizdock[hidden]{display:none}
+  #wiz .wizinner{max-width:1560px;margin:0 auto;width:100%;display:flex;flex-direction:column;min-height:0;flex:1}
   #wiz .dlg-head,#wiz .dlg-foot{flex:none}
+  #wiz .dlg-head{padding-top:12px;padding-bottom:10px}
   #wiz .dlg-body{flex:1 1 auto;min-height:0;max-height:none;overflow-y:auto}
+  #wiz .dlg-foot{padding-top:12px;padding-bottom:14px}
+  body.wiz-open main{scroll-padding-top:58vh}
+  /* proposed (not-yet-applied) placements shown live in the timeline */
+  .gseg.proposed{outline:2px dashed var(--accent);outline-offset:2px}
+  .grow.proposed{background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 7%,transparent),transparent 55%)}
+  .grow.proposed .glabel .nm::after{content:'●';color:var(--accent);font-size:9px;margin-left:6px;vertical-align:middle}
   .steps{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap}
   .step{font-family:var(--mono);font-size:11px;padding:5px 10px;border-radius:99px;border:1px solid var(--border);color:var(--ink-mute)}
   .step.on{background:var(--accent);border-color:var(--accent);color:#04121f;font-weight:650}
@@ -295,6 +307,30 @@
 </nav>
 
 <main>
+<!-- WIZARD — docked at the top; the service window below updates live -->
+<section id="wiz" class="wizdock" hidden>
+  <div class="wizinner">
+    <div class="dlg-head">
+      <div style="display:flex;align-items:flex-start;gap:10px">
+        <div style="flex:1">
+          <div class="eyebrow" data-i18n="wizEyebrow">Wizard · first run</div>
+          <h3 style="margin-top:4px" data-i18n="wizTitle">Let's schedule safe updates for your fleet</h3>
+        </div>
+        <button class="chipbtn" id="wizLang"></button>
+        <button class="chipbtn" id="wizTheme"><span data-ic="moon"></span></button>
+      </div>
+      <div class="steps" id="wizSteps"></div>
+    </div>
+    <div class="dlg-body" id="wizBody"></div>
+    <div class="dlg-foot">
+      <button class="btn ghost" id="wizClose" data-i18n="wizClose">Close (finish later)</button>
+      <div style="display:flex;gap:10px">
+        <button class="btn ghost" id="wizBack" data-i18n="wizBack">Back</button>
+        <button class="btn primary" id="wizNext"></button>
+      </div>
+    </div>
+  </div>
+</section>
 <div class="wrap">
   <section class="pane active" id="pane-window">
     <div class="host unknown" id="hostbar" style="display:none">
@@ -490,29 +526,6 @@
   <div class="dlg-foot"><span></span><button class="btn ghost" onclick="sdlg.close()" data-i18n="close">Close</button></div>
 </dialog>
 
-<!-- WIZARD -->
-<dialog id="wiz">
-  <div class="dlg-head">
-    <div style="display:flex;align-items:flex-start;gap:10px">
-      <div style="flex:1">
-        <div class="eyebrow" data-i18n="wizEyebrow">Wizard · first run</div>
-        <h3 style="margin-top:6px" data-i18n="wizTitle">Let's schedule safe updates for your fleet</h3>
-      </div>
-      <button class="chipbtn" id="wizLang"></button>
-      <button class="chipbtn" id="wizTheme"><span data-ic="moon"></span></button>
-    </div>
-    <div class="steps" id="wizSteps"></div>
-  </div>
-  <div class="dlg-body" id="wizBody"></div>
-  <div class="dlg-foot">
-    <button class="btn ghost" id="wizClose" data-i18n="wizClose">Close (finish later)</button>
-    <div style="display:flex;gap:10px">
-      <button class="btn ghost" id="wizBack" data-i18n="wizBack">Back</button>
-      <button class="btn primary" id="wizNext"></button>
-    </div>
-  </div>
-</dialog>
-
 <script>
 const el=id=>document.getElementById(id);
 
@@ -615,6 +628,8 @@ const I18N={
     wizCovNote:'Selected: {n} machine(s) to enrol.',wizLxcWindow:'LXC maintenance window',
     fresh:'fresh',stale:'stale',none:'none',
     wizSchedLead:'I place updates into your maintenance window and skip every backup window. Adjust and press Propose.',
+    wizPreviewHint:'The proposal appears live in the service window below — accept it at the last step.',
+    wizPreviewBadge:'Proposed schedule (preview) — not applied until you finish the wizard',
     wizScopeLead:'Default policy applied to enrolled containers with a fresh backup:',
     wizScopeSec:'OS package updates (apt/apk/pacman)',wizScopeApp:'Application update',wizScopeAppNote:'Auto-detect runs each container’s own community-scripts updater; non-helper containers are skipped safely.',
     wizScopeReboot:'Reboot after update if required (then verify it comes back)',
@@ -691,6 +706,8 @@ const I18N={
     wizCovNote:'Wybrano: {n} maszyn do objęcia.',wizLxcWindow:'Okno serwisowe LXC',
     fresh:'świeża',stale:'nieświeża',none:'brak',
     wizSchedLead:'Układam aktualizacje w Twoim oknie serwisowym i omijam każde okno backupu. Dostrój i naciśnij Zaproponuj.',
+    wizPreviewHint:'Propozycja pojawia się na żywo w oknie serwisowym poniżej — zatwierdzisz ją w ostatnim kroku.',
+    wizPreviewBadge:'Proponowany harmonogram (podgląd) — zostanie zastosowany dopiero po zakończeniu kreatora',
     wizScopeLead:'Domyślna polityka dla włączonych kontenerów ze świeżym backupem:',
     wizScopeSec:'Aktualizacje pakietów OS (apt/apk/pacman)',wizScopeApp:'Aktualizacja aplikacji',wizScopeAppNote:'Autowykrywanie uruchamia własny updater community-scripts w kontenerze; kontenery bez niego są bezpiecznie pomijane.',
     wizScopeReboot:'Restart po aktualizacji jeśli wymagany (z weryfikacją powrotu)',
@@ -708,7 +725,7 @@ function applyLang(l){
   el('langBtn').innerHTML=langLbl;el('wizLang').innerHTML=langLbl;
   document.querySelectorAll('[data-i18n]').forEach(n=>n.textContent=t(n.dataset.i18n));
   document.querySelectorAll('[data-i18n-ph]').forEach(n=>n.placeholder=t(n.dataset.i18nPh));
-  render();if(el('wiz').open)renderWiz();
+  render();if(!el('wiz').hidden)renderWiz();
   if(el('nPreview'))renderNotifyPreview();
 }
 el('langBtn').onclick=()=>applyLang(LANG==='en'?'pl':'en');
@@ -723,7 +740,7 @@ applyTheme(localStorage.getItem('au_theme')||'dark');
 
 // ---------- tabs ----------
 let logTimer=null,guestsTimer=null;
-function startGuestsAuto(){stopGuestsAuto();guestsTimer=setInterval(()=>{if(!el('dlg').open&&!el('wiz').open)load();},5000);}
+function startGuestsAuto(){stopGuestsAuto();guestsTimer=setInterval(()=>{if(!el('dlg').open&&el('wiz').hidden)load();},5000);}
 function stopGuestsAuto(){if(guestsTimer){clearInterval(guestsTimer);guestsTimer=null;}}
 document.querySelectorAll('nav .tab').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('nav .tab').forEach(x=>x.classList.toggle('active',x===b));
@@ -813,12 +830,15 @@ function renderGantt(d){
   el('ganttAxis').innerHTML=ticks.map(m=>{const p=ribPct(m),tx=p<=1?'0':(p>=99?'-100%':'-50%');
     return `<span style="left:${p}%;transform:translateX(${tx})">${fmtMin(m)}</span>`;}).join('');
   const grid=ticks.map(m=>`<i style="left:${ribPct(m)}%"></i>`).join('');
-  el('ribbonHint').textContent=(inv.windows&&inv.windows.length)?t('ribbonHint'):'— '+t('noWindows');
+  el('ribbonHint').textContent=WIZPREVIEW?('● '+t('wizPreviewBadge')):((inv.windows&&inv.windows.length)?t('ribbonHint'):'— '+t('noWindows'));
 
   // --- week view: pick which night to show (chips = per-night machine counts) ---
   const gwd=x=>(x.config.weekdays&&x.config.weekdays.length)?(x.config.weekdays[0]%7):6;
+  // while the wizard is proposing, render the PROPOSED placement here instead of the
+  // saved schedule, so the plan appears in the real service window before it's applied
+  const G=WIZPREVIEW?previewGuests(d):(d.guests||[]);
   const dayCount={};
-  for(const x of d.guests){if(x.config.enabled&&x.config.mode==='calendar')dayCount[gwd(x)]=(dayCount[gwd(x)]||0)+1;}
+  for(const x of G){if(x.config.enabled&&x.config.mode==='calendar')dayCount[gwd(x)]=(dayCount[gwd(x)]||0)+1;}
   let presentDays=Object.keys(dayCount).map(Number).sort((a,b)=>a-b);
   if(!presentDays.length)presentDays=((d.maintenance||{}).days||[6]).slice().sort((a,b)=>a-b);
   if(GDAY===null||!presentDays.includes(GDAY))
@@ -882,9 +902,9 @@ function renderGantt(d){
     return null;
   };
   // --- one row per enabled LXC ---
-  const gs=d.guests.filter(x=>x.config.enabled&&x.config.mode==='calendar'&&hhmmToMin((x.config.times||[])[0])!=null&&gwd(x)===GDAY)
+  const gs=G.filter(x=>x.config.enabled&&x.config.mode==='calendar'&&hhmmToMin((x.config.times||[])[0])!=null&&gwd(x)===GDAY)
     .map(x=>{const c=x.config;const sn=(c.snapshot&&c.snapshot.enabled&&c.snapshot.mode==='calendar')?hhmmToMin((c.snapshot.times||[])[0]):null;
-             return {name:x.name,vmid:x.vmid,m:hhmmToMin(c.times[0]),wds:c.weekdays||[],keep:c.keep,snap:sn};})
+             return {name:x.name,vmid:x.vmid,m:hhmmToMin(c.times[0]),wds:c.weekdays||[],keep:c.keep,snap:sn,preview:!!x._preview};})
     .sort((a,b)=>ribNorm(a.m)-ribNorm(b.m));
   if(!gs.length){
     html+=`<div class="grow"><div class="glabel off"><span class="nm">—</span></div>${track(`<span class="gempty">${t('ganttNoEnabled')}</span>`)}</div>`;
@@ -903,10 +923,10 @@ function renderGantt(d){
       // independent scheduled snapshot (autosnap), a real separate event -> orange tick
       if(g.snap!=null&&inAxis(g.snap))inner+=`<div class="gsnap" style="left:${ribPct(g.snap)}%" title="snapshot ${fmtMin(g.snap)}"></div>`;
       // the run: orange snapshot cap · azure update · orange prune cap
-      inner+=`<div class="gseg${zone?' bad':''}" title="${fmtMin(g.m)}${zone?' — '+t('ganttConflict'):''}" style="left:${l}%;width:max(34px,${segW}%)"><span class="cap"></span><span class="upd"></span><span class="cap"></span></div>`;
+      inner+=`<div class="gseg${zone?' bad':''}${g.preview?' proposed':''}" title="${fmtMin(g.m)}${zone?' — '+t('ganttConflict'):''}" style="left:${l}%;width:max(34px,${segW}%)"><span class="cap"></span><span class="upd"></span><span class="cap"></span></div>`;
       inner+=`<span class="glbl${zone?' bad':''}" style="left:${labelLeft}%">${zone?ic('alert','crit')+' ':''}${fmtMin(g.m)}${keepTxt}</span>`;
     }
-    html+=`<div class="grow${zone?' conflict':''}"><div class="glabel"><span class="nm">${g.name}</span><span class="id">${g.vmid}</span><span class="day">${wdList(g.wds)}</span></div>${track(inner)}</div>`;
+    html+=`<div class="grow${zone?' conflict':''}${g.preview?' proposed':''}"><div class="glabel"><span class="nm">${g.name}</span><span class="id">${g.vmid}</span><span class="day">${wdList(g.wds)}</span></div>${track(inner)}</div>`;
   }
   el('ganttRows').innerHTML=`<div class="ggrid">${grid}</div>`+html;
   el('ganttRows').querySelectorAll('.fbtn').forEach(btn=>btn.onclick=async()=>{
@@ -1231,9 +1251,48 @@ function renderNotifyPreview(){
 // ---------- WIZARD ----------
 let WSTEP=1;const WSCOPE={sec:true,app:'auto',reboot:false,hc:'auto'};
 let WSEL=null;   // Set of vmids to enroll (null = not yet initialised)
-el('openWiz').onclick=()=>{WSTEP=1;WSEL=null;PLAN=null;el('wiz').showModal();renderWiz();bootIcons(el('wiz'));};
-el('wizClose').onclick=()=>{localStorage.setItem('au_wizard_done','1');el('wiz').close();};
+let WIZPREVIEW=null;   // when set, the timeline below renders this PROPOSED plan live
+function forceWindowTab(){
+  const wtab=document.querySelector('nav .tab[data-tab="window"]');
+  document.querySelectorAll('nav .tab').forEach(x=>x.classList.toggle('active',x===wtab));
+  document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('active',p.id==='pane-window'));
+  stopLogAuto();
+}
+function openWizard(){
+  WSTEP=1;WSEL=null;PLAN=null;WIZPREVIEW=null;
+  forceWindowTab();                       // the service window is what shows below the dock
+  document.body.classList.add('wiz-open');
+  el('wiz').hidden=false;
+  renderWiz();bootIcons(el('wiz'));
+  render();                               // refresh the timeline underneath
+  const m=document.querySelector('main'); if(m)m.scrollTop=0;
+}
+function closeWizard(done){
+  if(done)localStorage.setItem('au_wizard_done','1');
+  el('wiz').hidden=true;document.body.classList.remove('wiz-open');
+  WIZPREVIEW=null;render();               // drop the preview, back to the real saved schedule
+  startGuestsAuto();
+}
+el('openWiz').onclick=openWizard;
+el('wizClose').onclick=()=>closeWizard(true);
 el('wizBack').onclick=()=>{if(WSTEP>1){WSTEP--;renderWiz();}};
+// build the guest list the timeline renders while previewing: planned machines get
+// their PROPOSED night+time; everything else keeps its saved schedule for context
+function previewGuests(d){
+  const plan=(WIZPREVIEW&&WIZPREVIEW.plan)||[];const by={};for(const p of plan)by[p.vmid]=p;
+  return (d.guests||[]).map(x=>{const p=by[x.vmid];if(!p)return x;
+    return {...x,_preview:true,config:{...x.config,enabled:true,mode:'calendar',times:[p.time],weekdays:[p.weekday]}};});
+}
+// push the current PLAN into the live timeline preview and re-render underneath
+function wizSyncPreview(){
+  WIZPREVIEW=(PLAN&&PLAN.plan&&PLAN.plan.length)?PLAN:null;
+  GDAY=null;                              // let the timeline pick the busiest proposed night
+  if(!el('wiz').hidden){render();
+    // bring the service window into view just below the docked wizard (scroll-padding
+    // keeps it clear of the sticky sheet) so the proposal is immediately visible
+    if(WIZPREVIEW)requestAnimationFrame(()=>{const sw=el('ganttDays');if(sw)sw.scrollIntoView({behavior:'smooth',block:'start'});});
+  }
+}
 async function applyWizHost(){
   if(!el('wHostEn'))return;
   const body={enabled:el('wHostEn').checked,mode:'calendar',
@@ -1243,7 +1302,7 @@ async function applyWizHost(){
   await fetch('/api/host-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 }
 el('wizNext').onclick=async()=>{
-  if(WSTEP===3){await applyWizHost(); if(!PLAN)await doPropose([...(WSEL||[])]);}   // save host anchor + ensure a proposal exists
+  if(WSTEP===3){await applyWizHost(); if(!PLAN)await doPropose([...(WSEL||[])]); wizSyncPreview();}   // save host anchor + ensure a proposal + live preview
   if(WSTEP<5){WSTEP++;renderWiz();return;}
   await wizFinish();
 };
@@ -1309,7 +1368,8 @@ function renderWiz(){
       <div><label class="thin" data-i18n="winEnd">${t('winEnd')}</label><input type="text" id="wEnd" value="${(DATA.maintenance||{}).window_end||'05:00'}"></div></div>
       <label class="thin">${t('maintDays')}</label><div id="wDays" class="daypick"></div>
       <div><label class="thin">${t('spacing')}</label><input type="number" id="wSpace" min="1" value="${(DATA.maintenance||{}).spacing_min||20}" style="max-width:120px"></div>
-      <div style="display:flex;gap:.5rem;margin-top:.8rem"><button class="btn primary" id="wPropose">${t('propose')}</button></div>
+      <div style="display:flex;gap:.5rem;margin-top:.8rem;align-items:center"><button class="btn primary" id="wPropose">${t('propose')}</button>
+        <span class="note" style="margin:0">${t('wizPreviewHint')}</span></div>
       <div id="wPreview" style="margin-top:.8rem"></div>`;
     el('wHostEn').checked=!!HU.enabled;
     el('wHostTime').value=(HU.times||['02:00'])[0];
@@ -1319,8 +1379,9 @@ function renderWiz(){
       el('mStart').value=el('wStart').value;el('mEnd').value=el('wEnd').value;el('mSpace').value=el('wSpace').value;
       fillDayPick('mDays',readDayPick('wDays'));
       await applyWizHost();
-      renderPlan(await doPropose([...(WSEL||[])]),el('wPreview'),null);};
-    if(PLAN)renderPlan(PLAN,el('wPreview'),null);
+      renderPlan(await doPropose([...(WSEL||[])]),el('wPreview'),null);
+      wizSyncPreview();};                  // paint the proposal into the timeline below
+    if(PLAN){renderPlan(PLAN,el('wPreview'),null);wizSyncPreview();}
   }else if(WSTEP===4){
     b.innerHTML=`<p style="color:var(--ink-dim)">${t('wizScopeLead')}</p>
       <div class="row" style="margin-top:.4rem"><input type="checkbox" id="wSec" ${WSCOPE.sec?'checked':''}><label style="margin:0">${t('wizScopeSec')}</label></div>
@@ -1363,14 +1424,14 @@ async function wizFinish(){
         body:JSON.stringify({...gx.config,enabled:false,force:true})});
     }
   }
-  localStorage.setItem('au_wizard_done','1');
-  el('wiz').close();alert(t('wizApplyDone'));load();
+  closeWizard(true);                       // hide the dock, drop the preview, collapse the view
+  alert(t('wizApplyDone'));load();
 }
 
 // ---------- boot ----------
 bootIcons();
 applyLang(LANG);
-load().then(()=>{if(!localStorage.getItem('au_wizard_done')){WSTEP=1;el('wiz').showModal();renderWiz();bootIcons(el('wiz'));}});
+load().then(()=>{if(!localStorage.getItem('au_wizard_done'))openWizard();});
 startGuestsAuto();
 </script>
 </body>
