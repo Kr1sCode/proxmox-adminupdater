@@ -854,14 +854,10 @@ function renderGantt(d){
   const G=WIZPREVIEW?previewGuests(d):(d.guests||[]);
   const dayCount={};
   for(const x of G){if(x.config.enabled&&x.config.mode==='calendar')dayCount[gwd(x)]=(dayCount[gwd(x)]||0)+1;}
-  // a night gets a tab if it has scheduled machines OR a backup window OR the host
-  // update — otherwise a backup that runs on a night with no LXC update (e.g. the Sat
-  // offsite job) would be unreachable in the week view.
-  const dset=new Set(Object.keys(dayCount).map(Number));
-  for(const w of (inv.windows||[]))if(w.days)w.days.forEach(dd=>dset.add(dd));
-  if(HU.enabled&&HU.mode==='calendar')(HU.weekdays||[]).forEach(dd=>dset.add(dd%7));
-  let presentDays=[...dset].sort((a,b)=>a-b);
-  if(!presentDays.length)presentDays=((d.maintenance||{}).days||[6]).slice().sort((a,b)=>a-b);
+  // full week view: every night is shown (Mon..Sun), empty ones included — so a quiet
+  // night like Sunday (no backup, no host job) stays visible and selectable instead of
+  // vanishing just because nothing runs then. The chip count is the LXC-update tally.
+  const presentDays=[0,1,2,3,4,5,6];
   if(GDAY===null||!presentDays.includes(GDAY))
     GDAY=presentDays.reduce((a,b)=>((dayCount[b]||0)>(dayCount[a]||0)?b:a),presentDays[0]);
   el('ganttDays').innerHTML=presentDays.map(dd=>`<div class="daytab${dd===GDAY?' on':''}" data-d="${dd}">${wd(dd)} <span class="cnt">${dayCount[dd]||0}</span></div>`).join('');
