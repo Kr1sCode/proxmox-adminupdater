@@ -22,6 +22,14 @@ recipes_dir    = /etc/proxmox-adminupdater/recipes
 exec_timeout   = 1800
 tls_insecure   = false
 
+# Ceiling (MB) for the panel's temporary "RAM boost during updates" feature. When
+# enabled in the panel, a guest's RAM is raised for the memory-heavy app-update build
+# (npm install / from-source compiles that OOM at tight limits -> rc=137) and restored
+# afterwards. The panel picks the target; the HOST clamps it here so a compromised LXC
+# can never set an absurd limit on a whitelisted guest. Set to a value your host can
+# actually spare across concurrent updates.
+ram_boost_max_mb = 8192
+
 # E-mail report (HTML) after each run.
 # notify_via: pve      -> reuse Proxmox's configured SMTP notification target
 #                        (reads /etc/pve/notifications.cfg + the password in

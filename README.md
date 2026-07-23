@@ -174,6 +174,25 @@ recipient override, a live preview and a **Send test** button. The executor pick
 these up on its next tick. (`host.conf` `notify_email` / `notify_on` still work as a
 fallback if the panel leaves them at defaults.)
 
+Each report **decodes the exit code** it shows (`rc=137`, `rc=113`, …) in **Polish and
+English** with what to actually do about it — e.g. `rc=137` → out of memory, raise the
+container's RAM; `rc=113` → the guest is under-provisioned for the update.
+
+## Temporary RAM boost during updates
+
+Some app updates **build from source** — `npm install`, native compiles — and a small
+container runs out of memory mid-build. The update then fails with **`rc=137`** (the
+kernel OOM-killer) or **`rc=113`** (some community-scripts updaters self-abort when
+under-provisioned), even though there is nothing wrong with the app.
+
+Turn on **Update behavior → “Temporarily raise RAM during updates”** in the panel and
+adminupdater raises the container's RAM to your chosen floor **only for the app-update
+step**, then restores the original value afterwards — whether the update succeeds,
+fails or rolls back. It only ever *raises* (a container that is already generous is left
+alone), and the **Proxmox host clamps the ceiling** with `ram_boost_max_mb` in
+`host.conf`, so a compromised panel can never set an absurd limit on a guest. The boost
+is shown in the e-mail report (`RAM 1024→4096 MB`).
+
 ## App recipes
 
 Drop `<name>.sh` in `/etc/proxmox-adminupdater/recipes/` on the host and set the

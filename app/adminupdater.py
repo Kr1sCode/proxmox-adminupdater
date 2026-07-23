@@ -97,6 +97,11 @@ def build_update_job(g, vmid, sett):
         "max_age_days": int(g["max_age_days"]),
         "health_check": g["health_check"],
         "auto_reboot": bool(g.get("auto_reboot")),
+        # Temporary RAM boost for the memory-heavy app-update build (opt-in, global
+        # toggle). The host clamps the target to its own ram_boost_max_mb and only ever
+        # raises — see maybe_ram_boost in the executor.
+        "ram_boost": {"enabled": bool(sett.get("ram_boost", False)),
+                      "mb": int(sett.get("ram_boost_mb", 4096) or 4096)},
     }
 
 
@@ -171,7 +176,8 @@ def record_report(results):
             done_qids.add(r["qid"])
         rec = {"kind": kind, "status": r.get("status"), "snapshot": r.get("snapshot"),
                "ts": r.get("ts"), "steps": r.get("steps", []),
-               "pruned": r.get("pruned", []), "reboot": r.get("reboot", False)}
+               "pruned": r.get("pruned", []), "reboot": r.get("reboot", False),
+               "ram_boost": r.get("ram_boost")}
         if kind == "host-update":
             hs = state.get(HOST_KEY, {})
             hs["last_run"] = now

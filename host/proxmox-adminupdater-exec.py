@@ -51,6 +51,10 @@ def load_cfg():
         "host_update_cmd": g.get("host_update_cmd",
                                  "apt update && apt --yes --no-new-pkgs upgrade"),
         "host_update_log": g.get("host_update_log", "/var/log/proxmox-apt-upgrade.log"),
+        # Ceiling for the temporary app-update RAM boost. The panel picks the target,
+        # the HOST caps it here — a compromised LXC can never set an absurd limit on a
+        # whitelisted guest (defence in depth, same spirit as host_update).
+        "ram_boost_max_mb": g.getint("ram_boost_max_mb", 8192),
     }
 
 
@@ -130,6 +134,45 @@ def build_app_update(cfg, ctid, app, distro="debian"):
     if rc != 0:
         return None
     return ["bash", "-lc", f"{dest}; rc=$?; rm -f {dest}; exit $rc"]
+
+
+def _ct_memory(ctid):
+    """Current memory limit (MB) of a container, read from `pct config`. None on error."""
+    rc, out = run(["pct", "config", str(ctid)], 30)
+    if rc != 0:
+        return None
+    m = re.search(r"^memory:\s*(\d+)", out, re.M)
+    return int(m.group(1)) if m else None
+
+
+def maybe_ram_boost(cfg, ctid, job, actions):
+    """Temporarily raise a container's RAM for the memory-heavy app-update BUILD step
+    (npm install / from-source compiles OOM at tight limits — that's rc=137, and some
+    community-scripts updaters self-abort with rc=113 when under-provisioned).
+
+    Panel-gated per job (ram_boost.enabled); the target floor comes from the panel but
+    the HOST clamps it to ram_boost_max_mb. Only ever RAISES — never lowers a guest that
+    is already generous. Returns {"from": MB, "to": MB} when a boost was applied (so the
+    report/e-mail can show it), else None. The caller restores in a finally, whatever
+    happens — a crash, a rollback or a normal finish all put the RAM back."""
+    rb = job.get("ram_boost") or {}
+    if not rb.get("enabled") or "app-update" not in actions:
+        return None
+    cur = _ct_memory(ctid)
+    if cur is None:
+        return None
+    cap = int(cfg.get("ram_boost_max_mb", 8192))
+    target = min(max(int(rb.get("mb") or 0), cur), cap)   # raise toward the floor, never past the cap
+    if target <= cur:
+        return None                                       # already has enough — nothing to do
+    rc, _ = run(["pct", "set", str(ctid), "-memory", str(target)], 60)
+    return {"from": cur, "to": target} if rc == 0 else None
+
+
+def restore_ram(ctid, mb):
+    """Put a boosted container's RAM back. Idempotent — safe even if a rollback already
+    reverted the config (snapshot predates the boost), since we just re-assert the original."""
+    run(["pct", "set", str(ctid), "-memory", str(int(mb))], 60)
 
 
 def snapshot(ctid, prefix):
@@ -348,54 +391,67 @@ def do_job(cfg, job):
     distro = detect_distro(ctid)
     res["distro"] = distro
 
-    # 3) run each action in order under that one snapshot
-    overall = "ok"
-    for action in actions:
-        step = {"action": action}
-        if action == "security-patch":
-            cmd = build_security_patch(distro)
-        elif action == "app-update":
-            cmd = build_app_update(cfg, ctid, str(job.get("app", "")), distro)
-        else:
-            cmd = None
-        if cmd is None:
-            res["steps"].append({**step, "status": "skipped", "rc": 0,
-                                 "log": f"brak obsługi ({distro}) / recepty"})
-            continue
-        rc, out = run(["pct", "exec", str(ctid), "--", *cmd], cfg["timeout"])
-        res["steps"].append({**step, "status": ("ok" if rc == 0 else "failed"),
-                             "rc": rc, "log": out[-2000:]})
-        if rc != 0:
-            res["status"] = _rollback_verdict(snap, job, ctid, cfg["timeout"])
-            return res  # stop the chain; the snapshot is the safety net
+    # 2b) optional temporary RAM boost for the memory-heavy app-update build. Applied
+    # AFTER the snapshot (so a rollback reverts to the original size) and restored in
+    # the finally below no matter how the job exits.
+    boost = maybe_ram_boost(cfg, ctid, job, actions)
+    if boost:
+        res["ram_boost"] = boost
+        res["steps"].append({"action": "ram-boost", "status": "ok", "rc": 0,
+                             "log": f"RAM {boost['from']}→{boost['to']} MB na czas aktualizacji"})
 
-    # 4) optional post-update reboot — ONLY if the guest opted in AND the update
-    # actually left /var/run/reboot-required (community-scripts convention). Verify
-    # the container comes back; if not, roll back to the pre-update snapshot.
-    if job.get("auto_reboot") and overall == "ok":
-        rc, _ = run(["pct", "exec", str(ctid), "--",
-                     "test", "-e", "/var/run/reboot-required"], 30)
-        if rc == 0:
-            ok, rlog = reboot_and_verify(ctid, cfg["timeout"])
-            res["steps"].append({"action": "reboot", "status": ("ok" if ok else "failed"),
-                                 "rc": 0 if ok else -1, "log": rlog})
-            if not ok:
+    try:
+        # 3) run each action in order under that one snapshot
+        overall = "ok"
+        for action in actions:
+            step = {"action": action}
+            if action == "security-patch":
+                cmd = build_security_patch(distro)
+            elif action == "app-update":
+                cmd = build_app_update(cfg, ctid, str(job.get("app", "")), distro)
+            else:
+                cmd = None
+            if cmd is None:
+                res["steps"].append({**step, "status": "skipped", "rc": 0,
+                                     "log": f"brak obsługi ({distro}) / recepty"})
+                continue
+            rc, out = run(["pct", "exec", str(ctid), "--", *cmd], cfg["timeout"])
+            res["steps"].append({**step, "status": ("ok" if rc == 0 else "failed"),
+                                 "rc": rc, "log": out[-2000:]})
+            if rc != 0:
                 res["status"] = _rollback_verdict(snap, job, ctid, cfg["timeout"])
-                return res
+                return res  # stop the chain; the snapshot is the safety net
 
-    # 5) post-update health-check — verify the guest actually works. A failing
-    # probe fails the run (and rolls back) even though apt/apk returned 0.
-    hcmd = build_health_check(job.get("health_check"))
-    if hcmd:
-        rc, out = run(["pct", "exec", str(ctid), "--", *hcmd], cfg["timeout"])
-        res["steps"].append({"action": "health-check",
-                             "status": ("ok" if rc == 0 else "failed"),
-                             "rc": rc, "log": out[-2000:]})
-        if rc != 0:
-            overall = _rollback_verdict(snap, job, ctid, cfg["timeout"])
+        # 4) optional post-update reboot — ONLY if the guest opted in AND the update
+        # actually left /var/run/reboot-required (community-scripts convention). Verify
+        # the container comes back; if not, roll back to the pre-update snapshot.
+        if job.get("auto_reboot") and overall == "ok":
+            rc, _ = run(["pct", "exec", str(ctid), "--",
+                         "test", "-e", "/var/run/reboot-required"], 30)
+            if rc == 0:
+                ok, rlog = reboot_and_verify(ctid, cfg["timeout"])
+                res["steps"].append({"action": "reboot", "status": ("ok" if ok else "failed"),
+                                     "rc": 0 if ok else -1, "log": rlog})
+                if not ok:
+                    res["status"] = _rollback_verdict(snap, job, ctid, cfg["timeout"])
+                    return res
 
-    res["status"] = overall
-    return res
+        # 5) post-update health-check — verify the guest actually works. A failing
+        # probe fails the run (and rolls back) even though apt/apk returned 0.
+        hcmd = build_health_check(job.get("health_check"))
+        if hcmd:
+            rc, out = run(["pct", "exec", str(ctid), "--", *hcmd], cfg["timeout"])
+            res["steps"].append({"action": "health-check",
+                                 "status": ("ok" if rc == 0 else "failed"),
+                                 "rc": rc, "log": out[-2000:]})
+            if rc != 0:
+                overall = _rollback_verdict(snap, job, ctid, cfg["timeout"])
+
+        res["status"] = overall
+        return res
+    finally:
+        if boost:
+            restore_ram(ctid, boost["from"])
 
 
 GOOD = ("ok", "skipped", "dryrun")
@@ -405,6 +461,53 @@ def _color(s):
     return {"ok": "#16a34a", "dryrun": "#0891b2", "skipped": "#64748b"}.get(s, "#dc2626")
 
 
+def rc_hint(rc):
+    """Plain-language reason for a non-zero exit code, in Polish AND English — so a bare
+    `rc=137` in the mail actually tells you what to DO about it. Returns (pl, en) or None
+    for rc==0 / unknown. Covers the ones that actually bite an unattended app-update:
+    OOM (137), community-scripts under-provisioned self-abort (113), timeout, apt errors."""
+    try:
+        rc = int(rc)
+    except (TypeError, ValueError):
+        return None
+    if rc == 0:
+        return None
+    table = {
+        137: ("pamięć wyczerpana — proces zabity przez OOM. Zwiększ przydział RAM kontenera, "
+              "albo włącz „tymczasowe zwiększanie RAM na czas aktualizacji” w ustawieniach.",
+              "out of memory — process OOM-killed. Increase the container's RAM, or enable "
+              "“temporary RAM boost during updates” in settings."),
+        113: ("kontener nie spełnia wymagań aktualizacji (za mało RAM/CPU) i aktualizator sam "
+              "przerwał pracę. Zwiększ zasoby kontenera (RAM/rdzenie).",
+              "container is under-provisioned for the update (too little RAM/CPU) and the "
+              "updater aborted itself. Raise the container's resources (RAM/cores)."),
+        124: ("przekroczono limit czasu — aktualizacja trwała za długo i została przerwana.",
+              "timed out — the update ran too long and was stopped."),
+        100: ("błąd menedżera pakietów (apt/dpkg) — sprawdź źródła pakietów i blokady dpkg.",
+              "package-manager error (apt/dpkg) — check the package sources and dpkg locks."),
+        126: ("polecenia nie można było wykonać (uprawnienia).",
+              "command could not be executed (permissions)."),
+        127: ("nie znaleziono polecenia w kontenerze.",
+              "command not found in the container."),
+        1:   ("ogólny błąd aktualizacji — szczegóły w logu poniżej.",
+              "generic update error — see the log below."),
+        -1:  ("odrzucone/przerwane przez adminupdater (whitelist, snapshot lub błąd wewnętrzny).",
+              "rejected/aborted by adminupdater (whitelist, snapshot, or internal error)."),
+    }
+    if rc in table:
+        return table[rc]
+    if 129 <= rc <= 165:                              # 128 + POSIX signal
+        sig = rc - 128
+        names = {2: "SIGINT", 9: "SIGKILL", 11: "SIGSEGV", 15: "SIGTERM"}
+        nm = names.get(sig, f"sygnał {sig}")
+        if sig == 9:  # SIGKILL is almost always the OOM killer for a build step
+            return ("proces zabity (SIGKILL) — najczęściej brak pamięci. Zwiększ RAM kontenera.",
+                    "process killed (SIGKILL) — usually out of memory. Increase the container's RAM.")
+        return (f"proces zakończony sygnałem {sig} ({nm}).",
+                f"process terminated by signal {sig} ({nm}).")
+    return None
+
+
 def build_email_html(results, host):
     ok = sum(1 for r in results if r["status"] == "ok")
     bad = [r for r in results if r["status"] not in GOOD]
@@ -412,13 +515,24 @@ def build_email_html(results, host):
     cards = []
     for r in results:
         col = _color(r["status"])
-        steps = "".join(
-            f"<tr><td style='padding:2px 10px;color:#475569'>{s.get('action')}</td>"
-            f"<td style='padding:2px 10px;color:{_color(s.get('status'))};font-weight:600'>{s.get('status')}</td>"
-            f"<td style='padding:2px 10px;color:#94a3b8'>rc={s.get('rc')}</td></tr>"
-            for s in r.get("steps", []))
+        rows = []
+        for s in r.get("steps", []):
+            rows.append(
+                f"<tr><td style='padding:2px 10px;color:#475569'>{s.get('action')}</td>"
+                f"<td style='padding:2px 10px;color:{_color(s.get('status'))};font-weight:600'>{s.get('status')}</td>"
+                f"<td style='padding:2px 10px;color:#94a3b8'>rc={s.get('rc')}</td></tr>")
+            hint = rc_hint(s.get("rc")) if s.get("status") not in GOOD else None
+            if hint:      # decode the exit code right under the step that produced it
+                rows.append(
+                    "<tr><td colspan='3' style='padding:0 10px 8px;color:#b45309;"
+                    "font-size:12px;line-height:1.5'>"
+                    f"⚠ {hint[0]}<br><span style='color:#94a3b8'>{hint[1]}</span></td></tr>")
+        steps = "".join(rows)
         pruned = r.get("pruned") or []
         prune = f" · pruned {len(pruned)}" if pruned else ""
+        rb = r.get("ram_boost")
+        rb_html = (f"<div style='color:#0891b2'>RAM tymczasowo {rb['from']}→{rb['to']} MB "
+                   f"na czas aktualizacji / temporary RAM boost</div>") if rb else ""
         label = "PVE host" if r.get("kind") == "host-update" else f"CT {r.get('ctid')}"
         cards.append(
             f"<div style='border:1px solid #e2e8f0;border-radius:10px;margin:10px 0;overflow:hidden'>"
@@ -426,6 +540,7 @@ def build_email_html(results, host):
             f"{label} · {r.get('kind', 'update')} · {str(r['status']).upper()}</div>"
             f"<div style='padding:8px 12px;font-size:13px;color:#334155'>"
             f"<div>snapshot: <code>{r.get('snapshot') or '—'}</code>{prune}</div>"
+            f"{rb_html}"
             f"<table style='border-collapse:collapse;margin-top:6px'>{steps}</table></div></div>")
     banner = "#dc2626" if bad else "#16a34a"
     title = f"{len(bad)} problem(ów)" if bad else "wszystko OK"
@@ -557,8 +672,15 @@ def build_email_text(results, host):
         lines.append(f"{label} · {r.get('kind', 'update')} · {str(r['status']).upper()}")
         if r.get("snapshot"):
             lines.append(f"  snapshot: {r['snapshot']}")
+        rb = r.get("ram_boost")
+        if rb:
+            lines.append(f"  RAM: {rb['from']}->{rb['to']} MB (tymczasowo / temporary)")
         for s in r.get("steps", []):
             lines.append(f"  - {s.get('action')}: {s.get('status')} (rc={s.get('rc')})")
+            hint = rc_hint(s.get("rc")) if s.get("status") not in GOOD else None
+            if hint:      # spell out the exit code, PL then EN
+                lines.append(f"      -> {hint[0]}")
+                lines.append(f"      -> {hint[1]}")
         pruned = r.get("pruned") or []
         if pruned:
             lines.append(f"  pruned: {len(pruned)}")
@@ -1007,9 +1129,15 @@ def sample_results():
     return [
         {"ctid": 108, "kind": "update", "status": "ok",
          "snapshot": "preupd_20260720_020000", "pruned": ["preupd_20260713_020000"],
+         "ram_boost": {"from": 1024, "to": 4096},
          "steps": [{"action": "security-patch", "status": "ok", "rc": 0},
+                   {"action": "ram-boost", "status": "ok", "rc": 0},
                    {"action": "app-update", "status": "ok", "rc": 0},
                    {"action": "health-check", "status": "ok", "rc": 0}]},
+        {"ctid": 114, "kind": "update", "status": "failed",
+         "snapshot": "preupd_20260720_021500",
+         "steps": [{"action": "security-patch", "status": "ok", "rc": 0},
+                   {"action": "app-update", "status": "failed", "rc": 137}]},
         {"kind": "host-update", "status": "failed", "reboot": True,
          "steps": [{"action": "host-update", "status": "failed", "rc": 100}]},
     ]

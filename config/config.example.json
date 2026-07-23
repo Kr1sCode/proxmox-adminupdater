@@ -7,7 +7,9 @@
     "snapshot_prefix": "preupd",
     "rollback_on_fail": false,
     "default_keep": 3,
-    "default_max_age_days": 0
+    "default_max_age_days": 0,
+    "ram_boost": false,
+    "ram_boost_mb": 4096
   },
   "auth": {
     "allowlist": ["root@pam"]

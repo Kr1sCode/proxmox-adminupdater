@@ -281,9 +281,16 @@ def api_settings():
     body = request.get_json(force=True) or {}
     cfg = core.load_config()
     for k in ("paused", "snapshot_prefix", "rollback_on_fail",
-              "default_keep", "default_max_age_days"):
+              "default_keep", "default_max_age_days", "ram_boost", "ram_boost_mb"):
         if k in body:
             cfg["settings"][k] = body[k]
+    if "ram_boost" in cfg["settings"]:
+        cfg["settings"]["ram_boost"] = bool(cfg["settings"]["ram_boost"])
+    if "ram_boost_mb" in cfg["settings"]:
+        try:                                  # clamp to a sane range; the host caps it again
+            cfg["settings"]["ram_boost_mb"] = max(512, min(int(cfg["settings"]["ram_boost_mb"]), 65536))
+        except (TypeError, ValueError):
+            cfg["settings"]["ram_boost_mb"] = 4096
     core.save_config(cfg)
     _audit("ustawienia globalne: " + ", ".join(f"{k}={cfg['settings'].get(k)}" for k in body
                                                if k in cfg["settings"]))

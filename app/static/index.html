@@ -441,6 +441,17 @@
         <div class="panel" id="nPreview" style="overflow:hidden;background:#f1f5f9"></div>
       </div>
     </div>
+    <div class="sec" style="margin-top:26px"><h2 data-i18n="behTitle">Update behavior</h2><span class="hint" data-i18n="behHint">— how updates run</span></div>
+    <div class="panel" style="padding:18px 20px;max-width:560px">
+      <div class="row" style="gap:.5rem"><input type="checkbox" id="rbEnabled"><label style="margin:0" data-i18n="rbLbl">Temporarily raise RAM during updates</label></div>
+      <p class="note" data-i18n="rbNote">Some app updates build from source (npm install, compiles) and run out of memory on a small container — the update fails with rc=137 (OOM) or rc=113 (under-provisioned). With this on, adminupdater raises the container's RAM just for the update and puts it back afterwards.</p>
+      <div id="rbMbWrap" style="margin-top:.6rem"><label class="thin" data-i18n="rbMb">Raise to at least (MB)</label><input type="number" id="rbMb" min="512" step="512" value="4096" style="max-width:160px"></div>
+      <p class="note" data-i18n="rbCap">The Proxmox host caps this (ram_boost_max_mb in host.conf), so it can never set an absurd value.</p>
+      <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+        <button class="btn primary" id="rbSave" data-i18n="save">Save</button>
+        <span id="rbMsg" class="muted" style="align-self:center;font-size:12px"></span>
+      </div>
+    </div>
   </section>
 </div>
 </main>
@@ -639,6 +650,11 @@ const I18N={
     notifyEmail:'Recipient (optional)',notifyEmailPh:'empty = use the Proxmox target’s recipient',notifyEmailNote:'Empty = send to whoever your Proxmox notification target already mails.',
     notifyTest:'Send test',notifyPreview:'Preview',notifyPreviewHint:'— sample of the e-mail',
     notifySaved:'Saved.',notifyTestQueued:'Test queued — the host sends it on its next tick (≤ 5 min).',
+    behTitle:'Update behavior',behHint:'— how updates run',
+    rbLbl:'Temporarily raise RAM during updates',
+    rbNote:'Some app updates build from source (npm install, compiles) and run out of memory on a small container — the update fails with rc=137 (OOM) or rc=113 (under-provisioned). With this on, adminupdater raises the container’s RAM just for the update and puts it back afterwards.',
+    rbMb:'Raise to at least (MB)',
+    rbCap:'The Proxmox host caps this (ram_boost_max_mb in host.conf), so it can never set an absurd value.',
     // wizard
     wizEyebrow:'Wizard · first run',wizTitle:"Let's schedule safe updates for your fleet",wizClose:'Close (finish later)',wizBack:'Back',wizFinish:'Finish',
     st1:'1 · Scan',st2:'2 · Machines',st3:'3 · Schedule',st4:'4 · Scope + health',st5:'5 · Notifications',
@@ -723,6 +739,11 @@ const I18N={
     notifyEmail:'Odbiorca (opcjonalnie)',notifyEmailPh:'puste = odbiorca z targetu Proxmoksa',notifyEmailNote:'Puste = wyślij do tego, kogo już adresuje Twój target powiadomień w Proxmox.',
     notifyTest:'Wyślij test',notifyPreview:'Podgląd',notifyPreviewHint:'— przykład e-maila',
     notifySaved:'Zapisano.',notifyTestQueued:'Test zakolejkowany — host wyśle go przy następnym tiku (≤ 5 min).',
+    behTitle:'Zachowanie aktualizacji',behHint:'— jak przebiegają aktualizacje',
+    rbLbl:'Tymczasowo zwiększaj RAM na czas aktualizacji',
+    rbNote:'Niektóre aktualizacje budują się ze źródeł (npm install, kompilacje) i na małym kontenerze brakuje im pamięci — aktualizacja pada z kodem rc=137 (OOM) lub rc=113 (za mało zasobów). Gdy to włączysz, adminupdater podnosi RAM kontenera tylko na czas aktualizacji i przywraca go po zakończeniu.',
+    rbMb:'Podnieś do co najmniej (MB)',
+    rbCap:'Host Proxmox ogranicza tę wartość (ram_boost_max_mb w host.conf), więc nie ustawi absurdalnej liczby.',
     wizEyebrow:'Kreator · pierwsze uruchomienie',wizTitle:'Ułóżmy bezpieczne aktualizacje Twojej floty',wizClose:'Zamknij (dokończę później)',wizBack:'Wstecz',wizFinish:'Zakończ',
     st1:'1 · Skan',st2:'2 · Maszyny',st3:'3 · Harmonogram',st4:'4 · Zakres + health',st5:'5 · Powiadomienia',
     wizScanLead:'Przeskanowałem hosta {n}. Oto co znalazłem:',scLxc:'kontenerów LXC',scFresh:'ma świeży backup (< {h} h)',scSnaps:'migawek łącznie',scNoBk:'bez żadnej kopii — ryzyko',
@@ -1273,8 +1294,24 @@ function fillNotify(){
   const n=DATA.notify||{when:'errors',grouping:'digest',format:'html',email:''};
   el('nWhen').value=n.when||'errors';el('nGroup').value=n.grouping||'digest';
   el('nFormat').value=n.format||'html';el('nEmail').value=n.email||'';
+  fillBehavior();
   renderNotifyPreview();
 }
+function fillBehavior(){
+  const on=!!(SET&&SET.ram_boost);
+  el('rbEnabled').checked=on;
+  el('rbMb').value=(SET&&SET.ram_boost_mb)||4096;
+  el('rbMbWrap').style.opacity=on?'1':'.5';
+}
+el('rbEnabled').onchange=()=>{el('rbMbWrap').style.opacity=el('rbEnabled').checked?'1':'.5';};
+el('rbSave').onclick=async()=>{
+  const mb=Math.max(512,parseInt(el('rbMb').value,10)||4096);
+  await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ram_boost:el('rbEnabled').checked,ram_boost_mb:mb})});
+  el('rbMb').value=mb;
+  el('rbMsg').textContent=t('notifySaved');setTimeout(()=>el('rbMsg').textContent='',3000);
+  load();
+};
 el('nFormat').onchange=renderNotifyPreview;
 el('nSave').onclick=async()=>{
   await fetch('/api/notify',{method:'POST',headers:{'Content-Type':'application/json'},
