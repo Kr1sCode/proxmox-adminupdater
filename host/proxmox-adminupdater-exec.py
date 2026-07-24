@@ -175,6 +175,25 @@ def restore_ram(ctid, mb):
     run(["pct", "set", str(ctid), "-memory", str(int(mb))], 60)
 
 
+def _ct_running(ctid):
+    return "running" in _sh(["pct", "status", str(ctid)], 15)
+
+
+def start_and_wait(ctid, timeout, wait=120):
+    """Start a stopped container and wait until it actually accepts commands, so the
+    update doesn't fire into a half-booted guest. Returns (ok, log)."""
+    t0 = time.time()
+    rc, out = run(["pct", "start", str(ctid)], timeout)
+    if rc != 0:
+        return False, "pct start nieudany: " + out[-500:]
+    deadline = time.time() + wait
+    while time.time() < deadline:
+        if _ct_running(ctid) and run(["pct", "exec", str(ctid), "--", "true"], 30)[0] == 0:
+            return True, f"kontener wystartowany na czas aktualizacji ({int(time.time() - t0)}s)"
+        time.sleep(3)
+    return False, f"kontener nie wstał w {wait}s"
+
+
 def snapshot(ctid, prefix):
     name = f"{prefix}_{datetime.now():%Y%m%d_%H%M%S}"
     rc, out = run(["pct", "snapshot", str(ctid), name,
@@ -373,6 +392,25 @@ def do_job(cfg, job):
     # ===== update job =====
     actions = job.get("actions") or ([job["action"]] if job.get("action") else [])
 
+    # 0) a POWERED-OFF container: nothing can be updated inside it. Per the guest's
+    # setting either leave it alone, or start it for the update — and then put it back
+    # the way we found it (start_stop) or leave it running (start_keep).
+    stop_after = False
+    if not _ct_running(ctid):
+        mode = job.get("offline_mode", "skip")
+        if mode not in ("start_stop", "start_keep"):
+            res.update(status="skipped",
+                       steps=[{"action": "power", "status": "skipped", "rc": 0,
+                               "log": "kontener wyłączony — pomijam (ustawienie: nie włączaj)"}])
+            return res
+        ok, plog = start_and_wait(ctid, cfg["timeout"])
+        res["steps"].append({"action": "power-on", "status": ("ok" if ok else "failed"),
+                             "rc": 0 if ok else -1, "log": plog})
+        if not ok:
+            res["status"] = "error"
+            return res
+        stop_after = mode == "start_stop"
+
     # 1) ONE snapshot up front — the rollback point for every step below.
     snap = None
     if job.get("pre_snapshot", True):
@@ -422,12 +460,16 @@ def do_job(cfg, job):
                 res["status"] = _rollback_verdict(snap, job, ctid, cfg["timeout"])
                 return res  # stop the chain; the snapshot is the safety net
 
-        # 4) optional post-update reboot — ONLY if the guest opted in AND the update
-        # actually left /var/run/reboot-required (community-scripts convention). Verify
-        # the container comes back; if not, roll back to the pre-update snapshot.
+        # 4) optional post-update reboot — the guest has to opt in, and then either the
+        # update left /var/run/reboot-required (community-scripts convention) or the
+        # guest is set to "always" (LXC rarely raises that flag — no kernel of its own).
+        # Verify the container comes back; if not, roll back to the pre-update snapshot.
         if job.get("auto_reboot") and overall == "ok":
-            rc, _ = run(["pct", "exec", str(ctid), "--",
-                         "test", "-e", "/var/run/reboot-required"], 30)
+            if job.get("reboot_mode") == "always":
+                rc = 0
+            else:
+                rc, _ = run(["pct", "exec", str(ctid), "--",
+                             "test", "-e", "/var/run/reboot-required"], 30)
             if rc == 0:
                 ok, rlog = reboot_and_verify(ctid, cfg["timeout"])
                 res["steps"].append({"action": "reboot", "status": ("ok" if ok else "failed"),
@@ -452,6 +494,13 @@ def do_job(cfg, job):
     finally:
         if boost:
             restore_ram(ctid, boost["from"])
+        # we powered it on only for this run — shut it back down however the job ended
+        # (a rollback may already have stopped it; pct stop on a stopped guest is a no-op).
+        if stop_after:
+            rc, out = run(["pct", "stop", str(ctid)], cfg["timeout"]) if _ct_running(ctid) else (0, "")
+            res["steps"].append({"action": "power-off", "status": ("ok" if rc == 0 else "failed"),
+                                 "rc": rc, "log": ("kontener wyłączony po aktualizacji"
+                                                   if rc == 0 else out[-500:])})
 
 
 GOOD = ("ok", "skipped", "dryrun")

@@ -201,11 +201,24 @@ def api_guest_save(vmid):
     for k in up.GUEST_DEFAULTS:
         if k in body:
             g[k] = body[k]
+    if g.get("reboot_mode") != "always":       # only two modes ever reach the executor
+        g["reboot_mode"] = "required"
+    if g.get("offline_mode") not in ("start_stop", "start_keep"):
+        g["offline_mode"] = "skip"
+    # Only normalize what the caller actually sent: an untouched field stays None so
+    # the guest keeps inheriting the global default (the wizard saves policy without it).
+    if "ram_boost" in body:
+        g["ram_boost"] = bool(body["ram_boost"])
+    if "ram_boost_mb" in body:
+        try:                                  # clamp to a sane range; the host caps it again
+            g["ram_boost_mb"] = max(512, min(int(body["ram_boost_mb"]), 65536))
+        except (TypeError, ValueError):
+            g["ram_boost_mb"] = 4096
     # FOOLPROOF: refuse a schedule time that lands inside a detected backup
     # window (PBS or built-in vzdump) unless the user explicitly forces it.
     if g.get("enabled") and g.get("mode") == "calendar" and not body.get("force"):
         for t in (g.get("times") or []):
-            win = up.time_in_backup_window(cfg, t)
+            win = up.time_in_backup_window(cfg, t, weekdays=g.get("weekdays"))
             if win:
                 # structured only — the UI localizes the message (EN/PL)
                 fmt = lambda m: f"{m // 60:02d}:{m % 60:02d}"
@@ -218,8 +231,10 @@ def api_guest_save(vmid):
     core.save_config(cfg)
     _audit(f"CT {vmid} polityka zapisana: enabled={g['enabled']} mode={g['mode']} "
            f"times={g.get('times')} weekdays={g.get('weekdays')} interval={g.get('interval_minutes')} "
-           f"patch={g['security_patch']} app={g.get('app_update')} reboot={g.get('auto_reboot')} "
-           f"health={g.get('health_check', {}).get('type')} keep={g.get('keep')} "
+           f"patch={g['security_patch']} app={g.get('app_update')} "
+           f"reboot={g.get('auto_reboot')}/{g['reboot_mode']} offline={g['offline_mode']} "
+           f"health={g.get('health_check', {}).get('type')} "
+           f"ram_boost={g['ram_boost']}/{g['ram_boost_mb']}MB keep={g.get('keep')} "
            f"max_age={g.get('max_age_days')} snap={bool((g.get('snapshot') or {}).get('enabled'))}")
     return jsonify({"ok": True, "config": g})
 

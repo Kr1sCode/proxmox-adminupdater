@@ -185,13 +185,16 @@ container runs out of memory mid-build. The update then fails with **`rc=137`** 
 kernel OOM-killer) or **`rc=113`** (some community-scripts updaters self-abort when
 under-provisioned), even though there is nothing wrong with the app.
 
-Turn on **Update behavior → “Temporarily raise RAM during updates”** in the panel and
-adminupdater raises the container's RAM to your chosen floor **only for the app-update
-step**, then restores the original value afterwards — whether the update succeeds,
+Tick **“Temporarily raise RAM during updates”** in a container's policy (LXC machines →
+edit) and adminupdater raises **that** container's RAM to the floor you set there **only
+for the app-update step**, then restores the original value afterwards — whether the update succeeds,
 fails or rolls back. It only ever *raises* (a container that is already generous is left
 alone), and the **Proxmox host clamps the ceiling** with `ram_boost_max_mb` in
 `host.conf`, so a compromised panel can never set an absurd limit on a guest. The boost
-is shown in the e-mail report (`RAM 1024→4096 MB`).
+is shown in the e-mail report (`RAM 1024→4096 MB`). The setting is **per container** — a
+build-heavy n8n gets 4–6 GB for the build, a tiny AdGuard needs none; containers that
+never had it set fall back to the global `settings.ram_boost` / `ram_boost_mb` defaults
+in `config.json`.
 
 ## App recipes
 

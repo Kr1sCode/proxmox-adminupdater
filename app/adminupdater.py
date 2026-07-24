@@ -39,7 +39,11 @@ GUEST_DEFAULTS = {
     "keep": None,                # preupd_ retention: keep newest N (0 = off); None = inherit
     "max_age_days": None,        # preupd_ retention: delete older than N days (0 = off); None = inherit
     "health_check": {"type": "none", "arg": ""},  # post-update probe; fail -> rollback
-    "auto_reboot": False,        # reboot after update IF /var/run/reboot-required, then verify
+    "auto_reboot": True,         # reboot after a successful update, then verify it comes back
+    "reboot_mode": "required",   # "required" = only if /var/run/reboot-required | "always"
+    "offline_mode": "skip",      # powered-off guest: "skip" | "start_stop" | "start_keep"
+    "ram_boost": None,           # temporary RAM raise for the app-update build; None = inherit global
+    "ram_boost_mb": None,        # target floor in MB; None = inherit global
     "snapshot": None,            # None = inherit SNAPSHOT_DEFAULTS (disabled)
 }
 
@@ -58,6 +62,12 @@ def guest_settings(cfg, vmid):
         g["keep"] = dk
     if g.get("max_age_days") is None:
         g["max_age_days"] = da
+    # RAM boost is per guest (a build-heavy n8n needs it, a tiny AdGuard doesn't);
+    # unset falls back to the global setting, which is where it used to live.
+    if g.get("ram_boost") is None:
+        g["ram_boost"] = bool(sett.get("ram_boost", False))
+    if g.get("ram_boost_mb") is None:
+        g["ram_boost_mb"] = int(sett.get("ram_boost_mb", 4096) or 4096)
     hc = g.get("health_check") if isinstance(g.get("health_check"), dict) else {}
     g["health_check"] = {"type": hc.get("type", "none"), "arg": str(hc.get("arg", ""))}
     s = dict(SNAPSHOT_DEFAULTS)
@@ -97,11 +107,17 @@ def build_update_job(g, vmid, sett):
         "max_age_days": int(g["max_age_days"]),
         "health_check": g["health_check"],
         "auto_reboot": bool(g.get("auto_reboot")),
-        # Temporary RAM boost for the memory-heavy app-update build (opt-in, global
-        # toggle). The host clamps the target to its own ram_boost_max_mb and only ever
+        # "always" reboots every successful update; "required" waits for the guest to
+        # ask for it (/var/run/reboot-required) — rare in LXC, no kernel of its own.
+        "reboot_mode": "always" if g.get("reboot_mode") == "always" else "required",
+        # what to do when the container is powered off at update time
+        "offline_mode": (g.get("offline_mode") if g.get("offline_mode")
+                         in ("start_stop", "start_keep") else "skip"),
+        # Temporary RAM boost for the memory-heavy app-update build (opt-in, per
+        # guest). The host clamps the target to its own ram_boost_max_mb and only ever
         # raises — see maybe_ram_boost in the executor.
-        "ram_boost": {"enabled": bool(sett.get("ram_boost", False)),
-                      "mb": int(sett.get("ram_boost_mb", 4096) or 4096)},
+        "ram_boost": {"enabled": bool(g.get("ram_boost")),
+                      "mb": int(g.get("ram_boost_mb") or 4096)},
     }
 
 
@@ -527,14 +543,20 @@ def set_extra_forbidden(job_id, on, start_min=None, end_min=None, label=""):
     return ef
 
 
-def time_in_backup_window(cfg, hhmm, inv=None):
+def time_in_backup_window(cfg, hhmm, inv=None, weekdays=None):
     """FOOLPROOF check: is this HH:MM inside a detected backup window? Used to
-    reject/warn manual schedule entries before they can ever run."""
+    reject/warn manual schedule entries before they can ever run. Day-aware: a window
+    that only runs Sat (or the guest that only runs Wed) is no collision — pass the
+    guest's weekdays ([] / None = every night, so every window counts)."""
     inv = inv if inv is not None else get_inventory()
     m = _hhmm(hhmm)
     if m is None:
         return None
+    gwd = {int(d) % 7 for d in (weekdays or [])}
     for w in inv.get("windows", []):
+        wwd = w.get("days")
+        if gwd and wwd is not None and not (gwd & {int(d) % 7 for d in wwd}):
+            continue                      # they never share a night
         s, e = int(w["start_min"]), int(w["end_min"])
         if ((s <= m < e) if s <= e else (m >= s or m < e)):
             return w

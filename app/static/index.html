@@ -441,17 +441,6 @@
         <div class="panel" id="nPreview" style="overflow:hidden;background:#f1f5f9"></div>
       </div>
     </div>
-    <div class="sec" style="margin-top:26px"><h2 data-i18n="behTitle">Update behavior</h2><span class="hint" data-i18n="behHint">— how updates run</span></div>
-    <div class="panel" style="padding:18px 20px;max-width:560px">
-      <div class="row" style="gap:.5rem"><input type="checkbox" id="rbEnabled"><label style="margin:0" data-i18n="rbLbl">Temporarily raise RAM during updates</label></div>
-      <p class="note" data-i18n="rbNote">Some app updates build from source (npm install, compiles) and run out of memory on a small container — the update fails with rc=137 (OOM) or rc=113 (under-provisioned). With this on, adminupdater raises the container's RAM just for the update and puts it back afterwards.</p>
-      <div id="rbMbWrap" style="margin-top:.6rem"><label class="thin" data-i18n="rbMb">Raise to at least (MB)</label><input type="number" id="rbMb" min="512" step="512" value="4096" style="max-width:160px"></div>
-      <p class="note" data-i18n="rbCap">The Proxmox host caps this (ram_boost_max_mb in host.conf), so it can never set an absurd value.</p>
-      <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
-        <button class="btn primary" id="rbSave" data-i18n="save">Save</button>
-        <span id="rbMsg" class="muted" style="align-self:center;font-size:12px"></span>
-      </div>
-    </div>
   </section>
 </div>
 </main>
@@ -478,7 +467,28 @@
     </select>
     <input type="text" id="dApp" style="margin-top:.4rem;display:none" data-i18n-ph="appRecipePh" placeholder="recipe name (without .sh)">
     <div class="row" style="margin-top:.7rem"><input type="checkbox" id="dSnap"><label style="margin:0" data-i18n="snapBefore">Snapshot before update</label></div>
-    <div class="row" style="margin-top:.5rem"><input type="checkbox" id="dReboot"><label style="margin:0" data-i18n="autoReboot">Reboot after update if required, then verify it comes back</label></div>
+    <div class="row" style="margin-top:.5rem"><input type="checkbox" id="dReboot"><label style="margin:0" data-i18n="autoReboot">Reboot after update, then verify it comes back</label></div>
+    <div id="dRebWrap" class="row" style="margin-top:.4rem;gap:.6rem;align-items:center">
+      <label class="thin" style="margin:0" data-i18n="rebModeLbl">When to restart</label>
+      <select id="dRebMode" style="max-width:340px">
+        <option value="required" data-i18n="rebModeReq">Only when the guest asks for it (reboot-required)</option>
+        <option value="always" data-i18n="rebModeAlways">Always, after every successful update</option>
+      </select>
+    </div>
+    <p class="note" data-i18n="rebModeNote">An LXC has no kernel of its own, so /var/run/reboot-required almost never appears — pick “always” if you want the container restarted after each update anyway. A container that fails to come back is rolled back to the pre-update snapshot.</p>
+    <div class="row" style="margin-top:.5rem"><input type="checkbox" id="dRb"><label style="margin:0" data-i18n="rbLbl">Temporarily raise RAM during updates</label></div>
+    <div id="dRbWrap" class="row" style="margin-top:.4rem;gap:.6rem;align-items:center">
+      <label class="thin" style="margin:0" data-i18n="rbMb">Raise to at least (MB)</label>
+      <input type="number" id="dRbMb" min="512" step="512" value="4096" style="max-width:140px">
+    </div>
+    <p class="note" data-i18n="rbNote">Some app updates build from source (npm install, compiles) and run out of memory on a small container — the update fails with rc=137 (OOM) or rc=113 (under-provisioned). adminupdater raises this container's RAM just for the update and puts it back afterwards; the Proxmox host caps the value (ram_boost_max_mb in host.conf).</p>
+    <label style="margin-top:.7rem" data-i18n="offTitle">Container powered off at update time</label>
+    <select id="dOff">
+      <option value="skip" data-i18n="offSkip">Leave it off — skip the update</option>
+      <option value="start_stop" data-i18n="offStartStop">Start it, update, shut it back down</option>
+      <option value="start_keep" data-i18n="offStartKeep">Start it, update, leave it running</option>
+    </select>
+    <p class="note" data-i18n="offNote">A stopped container is normally skipped (its snapshot and its packages stay as they are). “Start it” powers it on, waits until it really answers, updates it, and then either shuts it down again or leaves it up.</p>
     <label style="margin-top:.7rem"><span data-i18n="retentionTitle">Snapshot retention</span> <span class="muted">(preupd_*)</span></label>
     <div class="grid2">
       <div><label class="thin" data-i18n="keepLbl">Keep newest (0 = unlimited)</label><input type="number" id="dKeep" min="0" value="3"></div>
@@ -618,7 +628,16 @@ const I18N={
     timeLbl:'Time (HH:MM)',daysLbl:'Days (0=Mon…6=Sun, empty=daily)',daysShort:'Days (empty=daily)',everyMinLbl:'Every N minutes',
     secPatch:'OS package updates (apt/apk/pacman upgrade)',
     appTitle:'Application update',appNone:'— none —',appAuto:'Auto-detect (community-scripts /usr/bin/update)',appRecipeOpt:'Host recipe (by name)',appRecipePh:'recipe name (without .sh)',
-    autoReboot:'Reboot after update if required, then verify it comes back',
+    autoReboot:'Reboot after update, then verify it comes back',
+    rebModeLbl:'When to restart',
+    rebModeReq:'Only when the guest asks for it (reboot-required)',
+    rebModeAlways:'Always, after every successful update',
+    rebModeNote:'An LXC has no kernel of its own, so /var/run/reboot-required almost never appears — pick “always” if you want the container restarted after each update anyway. A container that fails to come back is rolled back to the pre-update snapshot.',
+    offTitle:'Container powered off at update time',
+    offSkip:'Leave it off — skip the update',
+    offStartStop:'Start it, update, shut it back down',
+    offStartKeep:'Start it, update, leave it running',
+    offNote:'A stopped container is normally skipped (its snapshot and its packages stay as they are). “Start it” powers it on, waits until it really answers, updates it, and then either shuts it down again or leaves it up.',
     snapBefore:'Snapshot before update',retentionTitle:'Snapshot retention',
     keepLbl:'Keep newest (0 = unlimited)',ageLbl:'Delete older than (days, 0 = off)',
     healthTitle:'Health-check after update',healthHint:'(failure → rollback)',hcNone:'— none —',hcAuto:'auto — universal (is the container up?)',hcArgPh:'nginx | http://127.0.0.1/health',
@@ -650,11 +669,9 @@ const I18N={
     notifyEmail:'Recipient (optional)',notifyEmailPh:'empty = use the Proxmox target’s recipient',notifyEmailNote:'Empty = send to whoever your Proxmox notification target already mails.',
     notifyTest:'Send test',notifyPreview:'Preview',notifyPreviewHint:'— sample of the e-mail',
     notifySaved:'Saved.',notifyTestQueued:'Test queued — the host sends it on its next tick (≤ 5 min).',
-    behTitle:'Update behavior',behHint:'— how updates run',
     rbLbl:'Temporarily raise RAM during updates',
-    rbNote:'Some app updates build from source (npm install, compiles) and run out of memory on a small container — the update fails with rc=137 (OOM) or rc=113 (under-provisioned). With this on, adminupdater raises the container’s RAM just for the update and puts it back afterwards.',
+    rbNote:'Some app updates build from source (npm install, compiles) and run out of memory on a small container — the update fails with rc=137 (OOM) or rc=113 (under-provisioned). adminupdater raises this container’s RAM just for the update and puts it back afterwards; the Proxmox host caps the value (ram_boost_max_mb in host.conf).',
     rbMb:'Raise to at least (MB)',
-    rbCap:'The Proxmox host caps this (ram_boost_max_mb in host.conf), so it can never set an absurd value.',
     // wizard
     wizEyebrow:'Wizard · first run',wizTitle:"Let's schedule safe updates for your fleet",wizClose:'Close (finish later)',wizBack:'Back',wizFinish:'Finish',
     st1:'1 · Scan',st2:'2 · Machines',st3:'3 · Schedule',st4:'4 · Scope + health',st5:'5 · Notifications',
@@ -707,7 +724,16 @@ const I18N={
     timeLbl:'Godzina (HH:MM)',daysLbl:'Dni (0=Pn…6=Nd, pusto=codz.)',daysShort:'Dni (pusto=codz.)',everyMinLbl:'Co ile minut',
     secPatch:'Aktualizacje pakietów OS (apt/apk/pacman upgrade)',
     appTitle:'Aktualizacja aplikacji',appNone:'— brak —',appAuto:'Autowykrywanie (community-scripts /usr/bin/update)',appRecipeOpt:'Recepta hosta (po nazwie)',appRecipePh:'nazwa recepty (bez .sh)',
-    autoReboot:'Restart po aktualizacji jeśli wymagany, z weryfikacją powrotu',
+    autoReboot:'Restart po aktualizacji, z weryfikacją powrotu',
+    rebModeLbl:'Kiedy restartować',
+    rebModeReq:'Tylko gdy kontener tego zażąda (reboot-required)',
+    rebModeAlways:'Zawsze, po każdej udanej aktualizacji',
+    rebModeNote:'LXC nie ma własnego jądra, więc /var/run/reboot-required prawie nigdy nie powstaje — wybierz „zawsze", jeśli mimo to chcesz restart kontenera po każdej aktualizacji. Kontener, który nie wróci, jest cofany do migawki sprzed aktualizacji.',
+    offTitle:'Kontener wyłączony w porze aktualizacji',
+    offSkip:'Zostaw wyłączony — pomiń aktualizację',
+    offStartStop:'Włącz, zaktualizuj, wyłącz z powrotem',
+    offStartKeep:'Włącz, zaktualizuj, zostaw włączony',
+    offNote:'Wyłączony kontener jest domyślnie pomijany (migawka i pakiety zostają bez zmian). „Włącz" podnosi go, czeka aż naprawdę odpowiada, aktualizuje, a potem albo gasi z powrotem, albo zostawia uruchomiony.',
     snapBefore:'Snapshot przed aktualizacją',retentionTitle:'Retencja migawek',
     keepLbl:'Trzymaj ostatnie (0 = bez limitu)',ageLbl:'Kasuj starsze niż (dni, 0 = off)',
     healthTitle:'Health-check po aktualizacji',healthHint:'(porażka → rollback)',hcNone:'— brak —',hcAuto:'auto — uniwersalny (czy kontener wstał?)',hcArgPh:'nginx | http://127.0.0.1/health',
@@ -739,11 +765,9 @@ const I18N={
     notifyEmail:'Odbiorca (opcjonalnie)',notifyEmailPh:'puste = odbiorca z targetu Proxmoksa',notifyEmailNote:'Puste = wyślij do tego, kogo już adresuje Twój target powiadomień w Proxmox.',
     notifyTest:'Wyślij test',notifyPreview:'Podgląd',notifyPreviewHint:'— przykład e-maila',
     notifySaved:'Zapisano.',notifyTestQueued:'Test zakolejkowany — host wyśle go przy następnym tiku (≤ 5 min).',
-    behTitle:'Zachowanie aktualizacji',behHint:'— jak przebiegają aktualizacje',
     rbLbl:'Tymczasowo zwiększaj RAM na czas aktualizacji',
-    rbNote:'Niektóre aktualizacje budują się ze źródeł (npm install, kompilacje) i na małym kontenerze brakuje im pamięci — aktualizacja pada z kodem rc=137 (OOM) lub rc=113 (za mało zasobów). Gdy to włączysz, adminupdater podnosi RAM kontenera tylko na czas aktualizacji i przywraca go po zakończeniu.',
+    rbNote:'Niektóre aktualizacje budują się ze źródeł (npm install, kompilacje) i na małym kontenerze brakuje im pamięci — aktualizacja pada z kodem rc=137 (OOM) lub rc=113 (za mało zasobów). adminupdater podnosi RAM tego kontenera tylko na czas aktualizacji i przywraca go po zakończeniu; host Proxmox ogranicza tę wartość (ram_boost_max_mb w host.conf).',
     rbMb:'Podnieś do co najmniej (MB)',
-    rbCap:'Host Proxmox ogranicza tę wartość (ram_boost_max_mb w host.conf), więc nie ustawi absurdalnej liczby.',
     wizEyebrow:'Kreator · pierwsze uruchomienie',wizTitle:'Ułóżmy bezpieczne aktualizacje Twojej floty',wizClose:'Zamknij (dokończę później)',wizBack:'Wstecz',wizFinish:'Zakończ',
     st1:'1 · Skan',st2:'2 · Maszyny',st3:'3 · Harmonogram',st4:'4 · Zakres + health',st5:'5 · Powiadomienia',
     wizScanLead:'Przeskanowałem hosta {n}. Oto co znalazłem:',scLxc:'kontenerów LXC',scFresh:'ma świeży backup (< {h} h)',scSnaps:'migawek łącznie',scNoBk:'bez żadnej kopii — ryzyko',
@@ -1024,7 +1048,7 @@ function render(){
     const scope=[c.security_patch?'OS':null,c.app_update?('app:'+c.app_update):null].filter(Boolean).join(' + ')||'—';
     const hc=c.health_check||{};
     const hcChip=hc.type&&hc.type!=='none'?`<span class="chip idle">${ic('check')} ${hc.type}</span>`:'';
-    const rebootChip=c.auto_reboot?`<span class="chip idle" title="auto-reboot">${ic('refresh')}</span>`:'';
+    const rebootChip=c.auto_reboot?`<span class="chip idle" title="auto-reboot: ${c.reboot_mode==='always'?t('rebModeAlways'):t('rebModeReq')}">${ic('refresh')}${c.reboot_mode==='always'?'<b style="margin-left:2px">!</b>':''}</span>`:'';
     const snapsN=g.snapshots!=null?g.snapshots:'—';
     const ret=`keep ${c.keep>0?c.keep:'∞'} · ${snapsN}`;
     const queued=(!g.running&&QMAP[g.vmid])?` <span class="qtag">${ic('hourglass')} ${t('queued')}</span>`:'';
@@ -1203,9 +1227,12 @@ function edit(g){
   el('dAppMode').value=app==='auto'?'auto':(app?'recipe':'none');
   el('dApp').value=(app&&app!=='auto')?app:'';
   el('dSnap').checked=c.pre_snapshot;el('dReboot').checked=!!c.auto_reboot;
+  el('dRebMode').value=c.reboot_mode==='always'?'always':'required';
+  el('dOff').value=['start_stop','start_keep'].includes(c.offline_mode)?c.offline_mode:'skip';
+  el('dRb').checked=!!c.ram_boost;el('dRbMb').value=c.ram_boost_mb||4096;
   el('dKeep').value=c.keep;el('dAge').value=c.max_age_days;
   const hc=c.health_check||{};el('dHcType').value=hc.type||'none';el('dHcArg').value=hc.arg||'';
-  toggleAppMode();toggleHcArg();
+  toggleAppMode();toggleHcArg();toggleRb();toggleReb();
   const s=c.snapshot||{};el('sEnabled').checked=!!s.enabled;el('sMode').value=s.mode||'calendar';
   el('sTime').value=(s.times||['02:00'])[0];el('sDays').value=(s.weekdays||[]).join(',');
   el('sInterval').value=s.interval_minutes||1440;el('sPrefix').value=s.prefix||'auto';
@@ -1216,8 +1243,11 @@ function toggleMode(){const cal=el('dMode').value==='calendar';el('calBox').styl
 function toggleSnapMode(){const cal=el('sMode').value==='calendar';el('sCal').style.display=cal?'':'none';el('sInt').style.display=cal?'none':'';}
 function toggleAppMode(){el('dApp').style.display=el('dAppMode').value==='recipe'?'':'none';}
 function toggleHcArg(){const tt=el('dHcType').value;el('dHcArg').style.display=(tt==='systemd'||tt==='http')?'':'none';}
+function toggleRb(){el('dRbWrap').style.opacity=el('dRb').checked?'1':'.5';}
+function toggleReb(){el('dRebWrap').style.opacity=el('dReboot').checked?'1':'.5';}
 el('dMode').onchange=toggleMode;el('sMode').onchange=toggleSnapMode;
-el('dAppMode').onchange=toggleAppMode;el('dHcType').onchange=toggleHcArg;
+el('dAppMode').onchange=toggleAppMode;el('dHcType').onchange=toggleHcArg;el('dRb').onchange=toggleRb;
+el('dReboot').onchange=toggleReb;
 async function save(vmid){
   const am=el('dAppMode').value;
   const app=am==='auto'?'auto':(am==='recipe'?(el('dApp').value.trim()||null):null);
@@ -1225,6 +1255,8 @@ async function save(vmid){
     weekdays:el('dDays').value.split(',').map(x=>x.trim()).filter(x=>x!=='').map(Number),
     interval_minutes:+el('dInterval').value||10080,security_patch:el('dSec').checked,
     app_update:app,pre_snapshot:el('dSnap').checked,auto_reboot:el('dReboot').checked,
+    reboot_mode:el('dRebMode').value,offline_mode:el('dOff').value,
+    ram_boost:el('dRb').checked,ram_boost_mb:Math.max(512,parseInt(el('dRbMb').value,10)||4096),
     keep:Math.max(0,+el('dKeep').value||0),max_age_days:Math.max(0,+el('dAge').value||0),
     health_check:{type:el('dHcType').value,arg:el('dHcArg').value.trim()},
     snapshot:{enabled:el('sEnabled').checked,mode:el('sMode').value,times:[el('sTime').value.trim()],
@@ -1294,24 +1326,8 @@ function fillNotify(){
   const n=DATA.notify||{when:'errors',grouping:'digest',format:'html',email:''};
   el('nWhen').value=n.when||'errors';el('nGroup').value=n.grouping||'digest';
   el('nFormat').value=n.format||'html';el('nEmail').value=n.email||'';
-  fillBehavior();
   renderNotifyPreview();
 }
-function fillBehavior(){
-  const on=!!(SET&&SET.ram_boost);
-  el('rbEnabled').checked=on;
-  el('rbMb').value=(SET&&SET.ram_boost_mb)||4096;
-  el('rbMbWrap').style.opacity=on?'1':'.5';
-}
-el('rbEnabled').onchange=()=>{el('rbMbWrap').style.opacity=el('rbEnabled').checked?'1':'.5';};
-el('rbSave').onclick=async()=>{
-  const mb=Math.max(512,parseInt(el('rbMb').value,10)||4096);
-  await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({ram_boost:el('rbEnabled').checked,ram_boost_mb:mb})});
-  el('rbMb').value=mb;
-  el('rbMsg').textContent=t('notifySaved');setTimeout(()=>el('rbMsg').textContent='',3000);
-  load();
-};
 el('nFormat').onchange=renderNotifyPreview;
 el('nSave').onclick=async()=>{
   await fetch('/api/notify',{method:'POST',headers:{'Content-Type':'application/json'},
@@ -1348,7 +1364,7 @@ function renderNotifyPreview(){
 }
 
 // ---------- WIZARD ----------
-let WSTEP=1;const WSCOPE={sec:true,app:'auto',reboot:false,hc:'auto'};
+let WSTEP=1;const WSCOPE={sec:true,app:'auto',reboot:true,rebootMode:'required',hc:'auto'};
 let WSEL=null;   // Set of vmids to enroll (null = not yet initialised)
 let WIZPREVIEW=null;   // when set, the timeline below renders this PROPOSED plan live
 function forceWindowTab(){
@@ -1491,10 +1507,12 @@ function renderWiz(){
       <select id="wApp"><option value="none">${t('appNone')}</option><option value="auto">${t('appAuto')}</option></select>
       <p class="note">${t('wizScopeAppNote')}</p>
       <div class="row" style="margin-top:.5rem"><input type="checkbox" id="wReboot" ${WSCOPE.reboot?'checked':''}><label style="margin:0">${t('wizScopeReboot')}</label></div>
+      <label class="thin" style="margin-top:.4rem">${t('rebModeLbl')}</label>
+      <select id="wRebMode"><option value="required">${t('rebModeReq')}</option><option value="always">${t('rebModeAlways')}</option></select>
       <label class="thin" style="margin-top:.7rem">${t('wizScopeHc')}</label>
       <select id="wHc"><option value="none">${t('hcNone')}</option><option value="auto">${t('hcAuto')}</option></select>
       <p class="note">${t('wizScopeHcNote')}</p>`;
-    el('wApp').value=WSCOPE.app;el('wHc').value=WSCOPE.hc;
+    el('wApp').value=WSCOPE.app;el('wHc').value=WSCOPE.hc;el('wRebMode').value=WSCOPE.rebootMode;
   }else if(WSTEP===5){
     b.innerHTML=`<p style="color:var(--ink-dim)">${t('wizNotifLead')}</p><div class="prop"><div class="note">${t('wizNotifNote')}</div></div>
       ${!PLAN||!PLAN.plan.length?`<p class="note" style="color:var(--warn)">${t('wizNoPlan')}</p>`:''}`;
@@ -1505,6 +1523,7 @@ async function wizFinish(){
   if(el('wSec'))WSCOPE.sec=el('wSec').checked;
   if(el('wApp'))WSCOPE.app=el('wApp').value;
   if(el('wReboot'))WSCOPE.reboot=el('wReboot').checked;
+  if(el('wRebMode'))WSCOPE.rebootMode=el('wRebMode').value;
   if(el('wHc'))WSCOPE.hc=el('wHc').value;
   if(!PLAN||!PLAN.plan.length){alert(t('wizNoPlan'));WSTEP=3;renderWiz();return;}
   await applyPlan(PLAN);
@@ -1515,7 +1534,7 @@ async function wizFinish(){
     await fetch('/api/guests/'+it.vmid,{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({...cur,enabled:true,mode:'calendar',times:[it.time],weekdays:[it.weekday],
         security_patch:WSCOPE.sec,app_update:WSCOPE.app==='auto'?'auto':null,pre_snapshot:true,
-        auto_reboot:WSCOPE.reboot,
+        auto_reboot:WSCOPE.reboot,reboot_mode:WSCOPE.rebootMode,
         health_check:{type:WSCOPE.hc,arg:(cur.health_check||{}).arg||''},force:true})});
   }
   // honour exclusions: disable any machine the user unchecked that is still enabled
