@@ -670,6 +670,7 @@ const I18N={
     kPending:'Pending',kPendingS:'scheduled soon',kProblems:'Problems',kProblemsS:'rollback / health-check',
     kUpdatesFound:'Updates found',kUpdatesFoundS:'checked {a} / {b} machines',
     lowDiskChip:'⚠ low disk',diskAlertTitle:'{n} machine(s) blocked — not enough free disk space for the update',
+    postPendN:'{n} still pending',postPendTip:'Updates still outstanding right after this run (re-checked the same way as the "check" button, informational only — never triggers a rollback):',
     diskAlertLine:'{f} MB free (needs ≥ {m} MB)',
     kCoverage:'Backup coverage',kCoverageS:'{a} / {b} have a fresh copy',kNext:'Next run',kNextS:'{n} machines',kNextNone:'no run',
     noWindows:'no backup window detected',noBackupPlan:'no backup → skipped',blockedNoBackup:'no backup → not touched',
@@ -782,6 +783,7 @@ const I18N={
     kPending:'Oczekują',kPendingS:'zaplanowane wkrótce',kProblems:'Problemy',kProblemsS:'rollback / health-check',
     kUpdatesFound:'Znalezione aktualizacje',kUpdatesFoundS:'sprawdzono {a} / {b} maszyn',
     lowDiskChip:'⚠ mało miejsca',diskAlertTitle:'{n} maszyn(y) wstrzymane — za mało wolnego miejsca na aktualizację',
+    postPendN:'jeszcze {n} zaległych',postPendTip:'Aktualizacje nadal zaległe zaraz po tym przebiegu (sprawdzone tak samo jak przyciskiem „sprawdź", czysto informacyjne — nigdy nie wywołuje rollbacku):',
     diskAlertLine:'{f} MB wolne (potrzeba ≥ {m} MB)',
     kCoverage:'Pokrycie backupem',kCoverageS:'{a} / {b} ma świeżą kopię',kNext:'Najbliższy run',kNextS:'{n} maszyn',kNextNone:'brak runu',
     noWindows:'nie wykryto okna backupu',noBackupPlan:'brak backupu → pominięte',blockedNoBackup:'bez backupu → nie ruszam',
@@ -1178,7 +1180,11 @@ function render(){
     if(g.running)last=`<span class="run"><span class="spin"></span> ${t('running')}</span>`;
     else if(noAgent)last=`<span class="chip warn" title="${t('noAgentHint')}">${ic('alert')} ${t('noAgent')}</span>`;
     else if(g.blocked_no_backup)last=`<span class="chip warn">${t('blockedNoBackup')}</span>`;
-    else if(r)last=`<span class="chip ${r.status==='ok'?'good':(r.status==='low-disk'?'warn':'crit')}">${r.status==='ok'?'OK':(r.status==='rollback'?'↺ rollback':(r.status==='low-disk'?t('lowDiskChip'):r.status))}</span> <span class="muted mono">${(r.ts||'').slice(11,16)}</span>${queued}`;
+    else if(r){
+      const pp=(r.status==='ok'&&Array.isArray(r.post_pending)&&r.post_pending.length)?
+        ` <span class="chip warn" title="${(t('postPendTip')+'\n'+r.post_pending.slice(0,15).join('\n')).replace(/"/g,'&quot;')}">${ic('alert')} ${t('postPendN',{n:r.post_pending.length})}</span>`:'';
+      last=`<span class="chip ${r.status==='ok'?'good':(r.status==='low-disk'?'warn':'crit')}">${r.status==='ok'?'OK':(r.status==='rollback'?'↺ rollback':(r.status==='low-disk'?t('lowDiskChip'):r.status))}</span> <span class="muted mono">${(r.ts||'').slice(11,16)}</span>${pp}${queued}`;
+    }
     else last=`<span class="muted">—</span>${queued}`;
     const tr=document.createElement('tr');tr.dataset.vmid=g.vmid;
     if(noAgent||g.blocked_no_backup||(r&&r.status!=='ok'))tr.className='rowwarn';

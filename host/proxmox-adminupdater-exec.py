@@ -894,6 +894,29 @@ def do_job(cfg, job):
             if rc != 0:
                 overall = _rollback_verdict(snap, job, driver, cfg["timeout"])
 
+        # 6) post-update verification -- did it actually finish, not just "did the
+        # guest come back"? Re-runs the SAME read-only probe as the panel's "check"
+        # button (nothing installed, nothing rolled back on its own result -- purely
+        # informational, reported alongside health-check). Only on a run that's still
+        # "ok": a rolled-back guest is back at its pre-update state, so re-checking it
+        # would just repeat the original pending list, telling nobody anything new.
+        if overall == "ok":
+            ccmd = build_check_updates(distro)
+            if ccmd:
+                rc, out = driver.exec(ccmd, cfg["timeout"])
+                text = out.strip()
+                pending = [ln for ln in text.splitlines() if ln.strip()] if text else []
+                clean = (not pending) or (len(pending) == 1 and pending[0].startswith("OK:"))
+                res["post_pending"] = [] if clean else pending
+                if rc == 0:
+                    log = "brak zaległych aktualizacji / no updates left pending" if clean else \
+                          f"nadal oczekuje {len(pending)} / {len(pending)} still pending: " + "; ".join(pending[:10])
+                    res["steps"].append({"action": "post-check", "status": "ok", "rc": 0, "log": log})
+                else:
+                    # a failed probe is noise, not news -- never touches overall/rollback
+                    res["steps"].append({"action": "post-check", "status": "skipped", "rc": rc,
+                                         "log": "sonda nieudana, pomijam / probe failed, skipping"})
+
         res["status"] = overall
         return res
     finally:

@@ -225,6 +225,8 @@ def record_report(results):
         if kind == "check":
             rec["pending"] = r.get("pending", [])
             rec["distro"] = r.get("distro")
+        if kind == "update" and "post_pending" in r:
+            rec["post_pending"] = r.get("post_pending") or []
         if r.get("status") == "low-disk":
             rec["disk_free_mb"] = r.get("disk_free_mb")
             rec["disk_min_mb"] = r.get("disk_min_mb")
