@@ -448,10 +448,13 @@ def apply_schedule(plan, weekday=None):
 def save_maintenance(patch):
     cfg = core.load_config()
     m = maintenance_settings(cfg)
-    for k in ("window_start", "window_end", "days", "spacing_min", "concurrency"):
+    for k in ("window_start", "window_end", "days", "spacing_min", "concurrency", "spacing_mode"):
         if k in patch:
             m[k] = patch[k]
     m["days"] = sorted({int(d) % 7 for d in (m.get("days") or [6])}) or [6]
+    m["spacing_mode"] = "cascade" if m.get("spacing_mode") == "cascade" else "fixed"
+    if m["spacing_mode"] == "cascade":
+        m["concurrency"] = 1     # cascade is inherently one lane
     m.pop("weekdays", None)   # drop the migrated legacy field
     cfg["maintenance"] = m
     core.save_config(cfg)
@@ -492,8 +495,13 @@ MAINTENANCE_DEFAULTS = {
     "window_end": "05:00",     # ...to here
     "days": [6],               # weekdays AVAILABLE for updates (Mon=0..Sun=6) — the fleet
                                # is spread across these nights, not crammed into one
-    "spacing_min": 20,         # gap between two guests (HDD: serialize)
+    "spacing_min": 20,         # gap between two guests (HDD: serialize) -- "fixed" mode only
     "concurrency": 1,          # max guests updating at once per night (HDD default 1)
+    "spacing_mode": "fixed",   # "fixed" = each guest gets its own clock time, spacing_min
+                               # apart; "cascade" = one lane, no clock gap between guests --
+                               # a group all triggers at the same time and the host's single
+                               # serial executor runs them back to back for real, so a guest
+                               # that finishes early never leaves the next one idling
 }
 
 
@@ -504,6 +512,9 @@ def maintenance_settings(cfg):
     if "days" not in src and "weekdays" in src:   # migrate the old single-day field
         m["days"] = src["weekdays"]
     m["days"] = sorted({int(d) % 7 for d in (m.get("days") or [6])}) or [6]
+    m["spacing_mode"] = "cascade" if m.get("spacing_mode") == "cascade" else "fixed"
+    if m["spacing_mode"] == "cascade":
+        m["concurrency"] = 1     # cascade is inherently one lane -- see propose_schedule
     return m
 
 
@@ -636,7 +647,7 @@ def estimate_duration_min(vmid, state, fallback):
     return DUR_LIGHT if len(pending) <= 3 else DUR_MEDIUM
 
 
-def _place_one(lanes, ws, we_lin, conc, spacing, zones, duration=None):
+def _place_one(lanes, ws, we_lin, conc, spacing, zones, duration=None, cascade=False):
     """Place ONE item into the earliest free lane of a night; return its LINEAR minute
     (>= 1440 when it lands after midnight) or None if the night is full. Works in a
     linear timeline [ws, we_lin) so a window that crosses midnight (e.g. 23:30->05:00,
@@ -645,8 +656,13 @@ def _place_one(lanes, ws, we_lin, conc, spacing, zones, duration=None):
     when it's longer than the configured `spacing` -- a heavy Windows cumulative update
     pushes the NEXT guest further out instead of it being scheduled to start while the
     heavy one is still very likely mid-run (jobs execute strictly sequentially, one
-    executor process, see proxmox-adminupdater.service). Mutates lanes."""
-    slot_len = max(spacing, int(duration)) if duration else spacing
+    executor process, see proxmox-adminupdater.service). Mutates lanes.
+    `cascade=True` drops the spacing_min FLOOR -- the reserved slot is just the estimated
+    duration (min 1 min), not padded up to spacing_min. This is only used here to decide
+    how many guests fit in the night / where a cascade group starts; propose_schedule
+    collapses each contiguous group onto one shared trigger time afterwards."""
+    slot_len = (max(1, int(duration)) if duration else 1) if cascade else \
+               (max(spacing, int(duration)) if duration else spacing)
     for _ in range(conc):
         li = min(range(conc), key=lambda i: lanes[i])   # earliest-free lane
         cur = lanes[li]
@@ -665,13 +681,17 @@ def _place_one(lanes, ws, we_lin, conc, spacing, zones, duration=None):
     return None
 
 
-def _night_capacity(ws, we_lin, conc, spacing, zones):
+def _night_capacity(ws, we_lin, conc, spacing, zones, cascade=False):
     """How many placements fit in one night at the DEFAULT spacing (used only for
     ranking nights by free capacity + the capacity meter -- a generic proxy, not a
-    per-guest prediction, so it deliberately ignores duration estimates)."""
+    per-guest prediction, so it deliberately ignores REAL duration estimates). In
+    cascade mode spacing_min isn't used for real placement at all, so the proxy here
+    switches to a flat short guess instead -- otherwise the meter would understate
+    capacity and "placed" could exceed the displayed "slots" number."""
     lanes, n = [ws] * conc, 0
+    proxy_dur = 5 if cascade else None
     while n < 1000:
-        if _place_one(lanes, ws, we_lin, conc, spacing, zones) is None:
+        if _place_one(lanes, ws, we_lin, conc, spacing, zones, duration=proxy_dur, cascade=cascade) is None:
             break
         n += 1
     return n
@@ -686,6 +706,7 @@ def propose_schedule(cfg, vmids=None):
     ws, we = _hhmm(m["window_start"]), _hhmm(m["window_end"])
     spacing = max(1, int(m["spacing_min"]))
     conc = max(1, int(m["concurrency"]))
+    cascade = m["spacing_mode"] == "cascade"
     days = m["days"] or [6]
     fmt = lambda mn: f"{(mn // 60) % 24:02d}:{mn % 60:02d}"
     names = inv.get("guests") or {}
@@ -711,19 +732,20 @@ def propose_schedule(cfg, vmids=None):
     for d in days:
         z = day_zones(cfg, inv, d)
         nights.append({"weekday": d, "zones": z, "lanes": [ws] * conc,
-                       "cap": _night_capacity(ws, we_lin, conc, spacing, z), "placed": []})
+                       "cap": _night_capacity(ws, we_lin, conc, spacing, z, cascade), "placed": []})
     # quietest (most free) nights first
     order = sorted(range(len(nights)), key=lambda i: -nights[i]["cap"])
 
-    assign, unplaceable, di = {}, [], 0
+    assign, lin, unplaceable, di = {}, {}, [], 0
     for v in vmids:                        # round-robin across nights, biased to quiet ones
         placed = False
         for k in range(len(order)):
             night = nights[order[(di + k) % len(order)]]
             slot = _place_one(night["lanes"], ws, we_lin, conc, spacing, night["zones"],
-                               duration=durations.get(v))
+                               duration=durations.get(v), cascade=cascade)
             if slot is not None:
                 night["placed"].append(v)
+                lin[v] = slot                  # linear minute, pre-cascade-collapse
                 # a slot past midnight belongs to the NEXT calendar day
                 awd = (night["weekday"] + (1 if slot >= 1440 else 0)) % 7
                 assign[v] = (awd, slot % 1440)
@@ -733,6 +755,27 @@ def propose_schedule(cfg, vmids=None):
                 break
         if not placed:
             unplaceable.append(int(v))
+
+    if cascade:
+        # collapse each contiguous run within a night onto ONE shared trigger time --
+        # "contiguous" = this guest's slot picks up exactly where the previous one's
+        # estimated duration ends, i.e. _place_one never had to jump over a zone. Any
+        # gap bigger than that means a real zone sits between them, so the group after
+        # it gets its OWN shared time (it genuinely can't start before the zone clears).
+        # The actual real-time ordering/spacing within a group is then whatever the
+        # host's single serial executor does -- see proxmox-adminupdater-exec.py:main.
+        for nt in nights:                      # conc is forced to 1 in cascade mode,
+            cursor = group_start = None        # so "placed" is already chronological
+            for v in nt["placed"]:
+                s = lin[v]
+                if group_start is None or s > cursor + 0.001:
+                    group_start = s
+                lin[v] = group_start
+                cursor = s + max(1, int(durations.get(v) or 1))
+            for v in nt["placed"]:
+                s = lin[v]
+                awd = (nt["weekday"] + (1 if s >= 1440 else 0)) % 7
+                assign[v] = (awd, s % 1440)
 
     plan = [{"vmid": int(v), "name": names.get(v, {}).get("name", ""),
              "weekday": assign[v][0], "time": fmt(assign[v][1]), "duration_min": durations.get(v, spacing)}

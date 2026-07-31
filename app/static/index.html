@@ -575,10 +575,16 @@
     </div>
     <label data-i18n="maintDays">Nights of the week (the fleet is spread across them)</label>
     <div id="mDays" class="daypick"></div>
-    <div class="grid2">
+    <label data-i18n="spacingMode">Update pacing</label>
+    <select id="mSpaceMode">
+      <option value="fixed" data-i18n="spacingFixed">Fixed spacing per guest</option>
+      <option value="cascade" data-i18n="spacingCascade">Cascade — one after another, back to back</option>
+    </select>
+    <div id="mSpaceWrap" class="grid2">
       <div><label data-i18n="spacing">Spacing (min)</label><input type="number" id="mSpace" min="1" value="20"></div>
       <div><label data-i18n="concurrency">Max concurrent / night</label><input type="number" id="mConc" min="1" value="1"></div>
     </div>
+    <p id="mCascadeNoteP" class="note" style="display:none" data-i18n="spacingCascadeNote">All guests placed on the same night share one trigger time and run one after another, back to back, as soon as the previous one actually finishes — no fixed gap to guess, no idle time if one finishes early. Single lane (concurrency is forced to 1).</p>
     <div style="display:flex;gap:.5rem;margin-top:.9rem;align-items:center">
       <button class="btn primary" id="mPropose" data-i18n="propose">Propose</button>
       <span class="sp"></span>
@@ -707,6 +713,9 @@ const I18N={
     collideMsg:'falls inside the backup window',forceQ:'Save anyway?',
     maintTitle:'Maintenance window & schedule',maintNote:'Places enrolled containers into spaced slots inside the window, skipping every detected backup window and the host-update slot.',
     winStart:'Window start (HH:MM)',winEnd:'Window end (HH:MM)',maintDay:'Day (0=Mon…6=Sun)',maintDays:'Nights of the week (fleet spread across them)',spacing:'Spacing (min)',concurrency:'Max concurrent / night',
+    spacingMode:'Update pacing',spacingFixed:'Fixed spacing per guest',spacingCascade:'Cascade — one after another, back to back',
+    spacingCascadeNote:'All guests placed on the same night share one trigger time and run one after another, back to back, as soon as the previous one actually finishes — no fixed gap to guess, no idle time if one finishes early. Single lane (concurrency is forced to 1).',
+    cascadeNote:'Cascade mode: these guests share one trigger time and run one after another, back to back, as soon as the previous one really finishes.',
     capLine:'{p}/{r} placed · {s} slots/week across {n} nights',
     propose:'Propose',applyPlan:'Apply schedule',planPreview:'Proposed schedule',forbiddenZones:'Blocked windows (backups/host)',
     unplaceableLbl:'No slot (window too small)',noFresh:'No containers with a fresh backup to schedule.',placedWord:'placed',appliedN:'Schedule applied to',
@@ -816,6 +825,9 @@ const I18N={
     collideMsg:'wpada w okno backupu',forceQ:'Zapisać mimo to?',
     maintTitle:'Okno serwisowe i harmonogram',maintNote:'Rozmieszcza włączone kontenery w odstępach wewnątrz okna, omijając każde wykryte okno backupu i slot aktualizacji hosta.',
     winStart:'Początek okna (HH:MM)',winEnd:'Koniec okna (HH:MM)',maintDay:'Dzień (0=Pn…6=Nd)',maintDays:'Noce tygodnia (flota rozłożona po nich)',spacing:'Odstęp (min)',concurrency:'Maks. równoległych / noc',
+    spacingMode:'Tryb rozstawiania aktualizacji',spacingFixed:'Stały odstęp na maszynę',spacingCascade:'Kaskadowo — jedna po drugiej, bez przerwy',
+    spacingCascadeNote:'Wszystkie maszyny tej samej nocy dostają ten sam czas startu i wykonują się jedna po drugiej, od razu po zakończeniu poprzedniej — bez zgadywania sztywnego odstępu i bez marnowanego czasu, gdy jedna skończy szybciej. Jeden tor (concurrency wymuszone na 1).',
+    cascadeNote:'Tryb kaskadowy: te maszyny mają wspólny czas startu i wykonują się jedna po drugiej, od razu po zakończeniu poprzedniej.',
     capLine:'{p}/{r} rozmieszczono · {s} slotów/tydzień w {n} nocach',
     propose:'Zaproponuj',applyPlan:'Zastosuj harmonogram',planPreview:'Proponowany harmonogram',forbiddenZones:'Okna zablokowane (backupy/host)',
     unplaceableLbl:'Brak miejsca (okno za małe)',noFresh:'Brak kontenerów ze świeżą kopią do zaplanowania.',placedWord:'rozmieszczono',appliedN:'Harmonogram zastosowany do',
@@ -1332,17 +1344,22 @@ function readDayPick(id){return [...el(id).querySelectorAll('input[data-d]')].fi
 
 // ---------- planner dialog ----------
 let PLAN=null;
+function toggleSpaceMode(){const casc=el('mSpaceMode').value==='cascade';
+  el('mSpaceWrap').style.display=casc?'none':'';el('mCascadeNoteP').style.display=casc?'':'none';}
+el('mSpaceMode').onchange=toggleSpaceMode;
 el('proposeBtn').onclick=()=>{
   const m=DATA.maintenance||{};
   el('mStart').value=m.window_start||'01:30';el('mEnd').value=m.window_end||'05:00';
   el('mSpace').value=m.spacing_min||20;el('mConc').value=m.concurrency||1;
+  el('mSpaceMode').value=m.spacing_mode==='cascade'?'cascade':'fixed';toggleSpaceMode();
   fillDayPick('mDays',m.days||[6]);
   el('mApply').disabled=true;el('mPreview').innerHTML='';PLAN=null;el('sdlg').showModal();};
 async function doPropose(vmids){
   let days=readDayPick('mDays'); if(!days.length)days=[6];
   await fetch('/api/maintenance',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({window_start:el('mStart').value.trim(),window_end:el('mEnd').value.trim(),
-      days,spacing_min:Math.max(1,+el('mSpace').value||20),concurrency:Math.max(1,+el('mConc').value||1)})});
+      days,spacing_min:Math.max(1,+el('mSpace').value||20),concurrency:Math.max(1,+el('mConc').value||1),
+      spacing_mode:el('mSpaceMode').value==='cascade'?'cascade':'fixed'})});
   // vmids===undefined -> no filter (the standalone "Plan schedule" dialog); an ARRAY,
   // even empty, is an explicit wizard selection -- "?vmids=" with nothing after it means
   // place none, not "unfiltered" (the server tells the two apart by param presence).
@@ -1358,11 +1375,13 @@ function renderPlan(p,box,applyBtn){
   let html=`<div class="capbar"><b>${t('planPreview')}</b> <span class="muted">${t('capLine',{p:cap.placed,r:cap.requested,s:cap.slots_per_week,n:cap.nights})}</span>
     <div class="cover" style="margin-top:5px"><i style="width:${Math.min(100,util)}%;background:${util>85?'var(--crit)':'var(--good)'}"></i></div></div>`;
   // grouped by night
+  const cascade=(p.maintenance&&p.maintenance.spacing_mode==='cascade');
   for(const pd of (p.per_day||[])){
     if(!pd.items.length)continue;
     const zt=(pd.forbidden||[]).map(z=>`${z.start}–${z.end}`).join(', ')||'—';
     html+=`<div class="nightgrp"><div class="nighthd"><b>${wd(pd.weekday)}</b> <span class="muted">${pd.items.length}/${pd.cap} · ${t('forbiddenZones')}: ${zt}</span></div>
-      <div class="covlist">${pd.items.map(it=>`<div class="r"><span>${it.name||''} <span class="muted mono">${it.vmid}</span></span><b class="mono">${it.time}</b> <span class="muted mono" title="${t('durEstTip')}">~${it.duration_min}min</span></div>`).join('')}</div></div>`;
+      <div class="covlist">${pd.items.map((it,i)=>`<div class="r"><span>${cascade?`<b class="mono muted">#${i+1}</b> `:''}${it.name||''} <span class="muted mono">${it.vmid}</span></span><b class="mono">${it.time}</b> <span class="muted mono" title="${t('durEstTip')}">~${it.duration_min}min</span></div>`).join('')}</div>
+      ${cascade?`<p class="note" style="margin:.3rem 0 0">${t('cascadeNote')}</p>`:''}</div>`;
   }
   if((p.unplaceable||[]).length)html+=`<p class="note" style="color:var(--crit)">${t('unplaceableLbl')}: ${p.unplaceable.join(', ')}</p>`;
   box.innerHTML=html;
@@ -1557,6 +1576,7 @@ function openWizard(){
   const m=DATA.maintenance||{};
   el('mStart').value=m.window_start||'01:30';el('mEnd').value=m.window_end||'05:00';
   el('mSpace').value=m.spacing_min||20;el('mConc').value=m.concurrency||1;
+  el('mSpaceMode').value=m.spacing_mode==='cascade'?'cascade':'fixed';
   fillDayPick('mDays',m.days||[6]);
   forceWindowTab();                       // the service window is what shows below the dock
   document.body.classList.add('wiz-open');
@@ -1698,7 +1718,13 @@ function renderWiz(){
       <div class="grid2"><div><label class="thin" data-i18n="winStart">${t('winStart')}</label><input type="text" id="wStart" value="${(DATA.maintenance||{}).window_start||'01:30'}"></div>
       <div><label class="thin" data-i18n="winEnd">${t('winEnd')}</label><input type="text" id="wEnd" value="${(DATA.maintenance||{}).window_end||'05:00'}"></div></div>
       <label class="thin">${t('maintDays')}</label><div id="wDays" class="daypick"></div>
-      <div><label class="thin">${t('spacing')}</label><input type="number" id="wSpace" min="1" value="${(DATA.maintenance||{}).spacing_min||20}" style="max-width:120px"></div>
+      <label class="thin" style="margin-top:.5rem">${t('spacingMode')}</label>
+      <select id="wSpaceMode">
+        <option value="fixed">${t('spacingFixed')}</option>
+        <option value="cascade">${t('spacingCascade')}</option>
+      </select>
+      <div id="wSpaceWrap"><label class="thin">${t('spacing')}</label><input type="number" id="wSpace" min="1" value="${(DATA.maintenance||{}).spacing_min||20}" style="max-width:120px"></div>
+      <p id="wCascadeNoteP" class="note" style="display:none">${t('spacingCascadeNote')}</p>
       <div style="display:flex;gap:.5rem;margin-top:.8rem;align-items:center"><button class="btn primary" id="wPropose">${t('propose')}</button>
         <span class="note" style="margin:0">${t('wizPreviewHint')}</span></div>
       <div id="wPreview" style="margin-top:.8rem"></div>`;
@@ -1706,11 +1732,16 @@ function renderWiz(){
     el('wHostTime').value=(HU.times||['02:00'])[0];
     fillDayPick('wHostDays',(HU.weekdays&&HU.weekdays.length)?HU.weekdays:[5]);
     fillDayPick('wDays',(DATA.maintenance||{}).days||[6]);
+    el('wSpaceMode').value=(DATA.maintenance||{}).spacing_mode==='cascade'?'cascade':'fixed';
+    const toggleWSpaceMode=()=>{const casc=el('wSpaceMode').value==='cascade';
+      el('wSpaceWrap').style.display=casc?'none':'';el('wCascadeNoteP').style.display=casc?'':'none';};
+    toggleWSpaceMode();
     // any of these change WHERE things land -> mirror into the (shared) maintenance
     // fields, save the host anchor, and re-propose. Explicit button click scrolls the
     // preview into view; typing/toggling a field just repaints it in place.
     const syncAndPropose=scroll=>async()=>{
       el('mStart').value=el('wStart').value;el('mEnd').value=el('wEnd').value;el('mSpace').value=el('wSpace').value;
+      el('mSpaceMode').value=el('wSpaceMode').value;
       fillDayPick('mDays',readDayPick('wDays'));
       await applyWizHost();
       await wizProposeAndSync(scroll);};
@@ -1718,6 +1749,7 @@ function renderWiz(){
     el('wStart').onchange=syncAndPropose(false);
     el('wEnd').onchange=syncAndPropose(false);
     el('wSpace').onchange=syncAndPropose(false);
+    el('wSpaceMode').onchange=()=>{toggleWSpaceMode();syncAndPropose(false)();};
     el('wHostEn').onchange=syncAndPropose(false);
     el('wHostTime').onchange=syncAndPropose(false);
     b.querySelectorAll('#wDays input,#wHostDays input').forEach(c=>c.onchange=syncAndPropose(false));
