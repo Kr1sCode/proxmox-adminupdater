@@ -663,6 +663,7 @@ const I18N={
     wizHostJobsTitle:'Other scheduled activity on the host',wizHostJobsNote:'Read-only — these compete for the host disks. On the timeline you can mark any of them “avoid” so updates keep clear.',wizHostJobsLight:'…and {n} light task(s).',wizHostJobsNone:'No heavy host maintenance detected.',
     windowTab:'Service window',machinesTitle:'LXC machines',rowHint:'click = details / policy',
     ganttBackup:'Backup window',ganttDaily:'daily',ganttHostRow:'Host update',ganttNoSched:'not scheduled',ganttOffWindow:'outside the night window',ganttConflict:'overlaps a forbidden slot — re-run Plan schedule',
+    cascadeSeqTip:'Cascade: position #N in the queue — shares this trigger time with the ones before it; the real gap between them is however long the previous one actually takes to run, not a fixed clock offset.',
     ganttSnapC:'📷 snapshot',ganttSnapP:'🗑 prune',ganttNoEnabled:'No LXC has an update schedule yet — use “Plan schedule”.',
     wizHostTitle:'Update the PVE host itself',wizHostEnable:'Update the PVE host on a schedule',wizHostDays:'Day(s) of the host update',
     wizHostNote:'adminupdater runs this itself on the host (apt upgrade from host.conf → host_update_cmd, needs host_update=on) — it is not a third-party script. It shows as the amber row in the service window below; on a shared night the planner keeps LXC updates clear of it.',
@@ -776,6 +777,7 @@ const I18N={
     wizHostJobsTitle:'Inne zaplanowane zadania na hoście',wizHostJobsNote:'Tylko podgląd — konkurują o dyski hosta. Na osi czasu możesz oznaczyć dowolne „omijaj", by aktualizacje trzymały się z dala.',wizHostJobsLight:'…oraz {n} lekkich zadań.',wizHostJobsNone:'Nie wykryto ciężkiej konserwacji hosta.',
     windowTab:'Okno serwisowe',machinesTitle:'Maszyny LXC',rowHint:'klik = szczegóły / edycja polityki',
     ganttBackup:'Okno backupu',ganttDaily:'codziennie',ganttHostRow:'Aktualizacja hosta',ganttNoSched:'brak harmonogramu',ganttOffWindow:'poza oknem nocnym',ganttConflict:'nachodzi na strefę zakazaną — uruchom ponownie Zaplanuj harmonogram',
+    cascadeSeqTip:'Kaskada: pozycja #N w kolejce — dzieli ten sam czas startu z poprzednimi; realny odstęp między nimi to tyle, ile faktycznie trwa poprzednia, nie sztywny odstęp zegarowy.',
     ganttSnapC:'📷 migawka',ganttSnapP:'🗑 prune',ganttNoEnabled:'Żaden LXC nie ma jeszcze harmonogramu — użyj „Zaplanuj harmonogram".',
     wizHostTitle:'Aktualizacja samego hosta PVE',wizHostEnable:'Aktualizuj hosta PVE wg harmonogramu',wizHostDays:'Dzień(dni) aktualizacji hosta',
     wizHostNote:'adminupdater robi to sam na hoście (apt upgrade z host.conf → host_update_cmd, wymaga host_update=on) — to NIE zewnętrzny skrypt. Pokazuje się jako pomarańczowy wiersz w oknie serwisowym poniżej; w tę samą noc planer trzyma aktualizacje LXC z dala od tego slotu.',
@@ -1103,10 +1105,16 @@ function renderGantt(d){
     return null;
   };
   // --- one row per enabled LXC ---
+  const cascadeMode=mnt.spacing_mode==='cascade';
   const gs=G.filter(x=>x.config.enabled&&x.config.mode==='calendar'&&hhmmToMin((x.config.times||[])[0])!=null&&gwd(x)===GDAY)
     .map(x=>{const c=x.config;const sn=(c.snapshot&&c.snapshot.enabled&&c.snapshot.mode==='calendar')?hhmmToMin((c.snapshot.times||[])[0]):null;
              return {name:x.name,vmid:x.vmid,m:hhmmToMin(c.times[0]),wds:c.weekdays||[],keep:c.keep,snap:sn,preview:!!x._preview};})
     .sort((a,b)=>ribNorm(a.m)-ribNorm(b.m));
+  // cascade mode: several guests legitimately SHARE one clock time (the host's serial
+  // executor is what actually orders/spaces them, not the clock) -- without a marker
+  // that reads as "N rows stacked at the same instant", not "a queue". Number each run
+  // of consecutive identical times #1, #2, … so the chain is obvious at a glance.
+  if(cascadeMode){let seq=0,prevM=null;for(const g of gs){seq=(prevM!=null&&g.m===prevM)?seq+1:1;g.seq=seq;prevM=g.m;}}
   if(!gs.length){
     html+=`<div class="grow"><div class="glabel off"><span class="nm">—</span></div>${track(`<span class="gempty">${t('ganttNoEnabled')}</span>`)}</div>`;
   }
@@ -1114,6 +1122,7 @@ function renderGantt(d){
     let inner;
     const keepTxt=g.keep>0?' · keep '+g.keep:'';
     const zone=inAxis(g.m)?inZone(g.m):null;   // does this update land in a forbidden slot?
+    const seqBadge=(cascadeMode&&g.seq)?`<b class="mono" style="color:var(--good);margin-right:4px" title="${t('cascadeSeqTip')}">#${g.seq}</b>`:'';
     if(!inAxis(g.m)){
       // schedule falls outside the night axis (e.g. a daytime time) — flag it, don't draw a broken off-screen bar
       inner=`<span class="gempty" style="color:var(--warn)">${ic('alert','warn')} ${fmtMin(g.m)} — ${t('ganttOffWindow')}${keepTxt}</span>`;
@@ -1127,7 +1136,7 @@ function renderGantt(d){
       inner+=`<div class="gseg${zone?' bad':''}${g.preview?' proposed':''}" title="${fmtMin(g.m)}${zone?' — '+t('ganttConflict'):''}" style="left:${l}%;width:max(34px,${segW}%)"><span class="cap"></span><span class="upd"></span><span class="cap"></span></div>`;
       inner+=`<span class="glbl${zone?' bad':''}" style="left:${labelLeft}%">${zone?ic('alert','crit')+' ':''}${fmtMin(g.m)}${keepTxt}</span>`;
     }
-    html+=`<div class="grow${zone?' conflict':''}${g.preview?' proposed':''}"><div class="glabel"><span class="nm">${g.name}</span><span class="id">${g.vmid}</span><span class="day">${wdList(g.wds)}</span></div>${track(inner)}</div>`;
+    html+=`<div class="grow${zone?' conflict':''}${g.preview?' proposed':''}"><div class="glabel"><span class="nm">${seqBadge}${g.name}</span><span class="id">${g.vmid}</span><span class="day">${wdList(g.wds)}</span></div>${track(inner)}</div>`;
   }
   el('ganttRows').innerHTML=`<div class="ggrid">${grid}</div>`+html;
   el('ganttRows').querySelectorAll('.fbtn').forEach(btn=>btn.onclick=async()=>{
