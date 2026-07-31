@@ -22,8 +22,10 @@ detected **backup window** in red — its true duration learned from the PVE tas
 history, so a job that runs 23:00→01:22 across midnight blocks the whole span — and
 the **PVE host update** in amber. **Other scheduled host maintenance** competing for
 disk IO (ZFS scrub/trim, mdadm check, e2scrub, fstrim, unattended apt, offsite
-backups) shows per-night as read-only rows you can one-click "avoid". Each enrolled
-guest (LXC or VM) is laid out around them (snapshot → update → prune, time, retention). A live
+backups) shows per-night as read-only rows you can one-click "avoid". The thin
+**green ticks** mark the configured update window's own start/end (from Settings) —
+live, so editing the window moves them immediately. Each enrolled guest (LXC or VM)
+is laid out around all of that (snapshot → update → prune, time, retention). A live
 API/executor watchdog and refresh-cadence counters sit in the header. EN/PL and
 light/dark built in.
 
@@ -36,11 +38,11 @@ the only competition. Nothing is hidden just because it is empty.
 
 ![Week view — a quiet night](docs/dashboard-week-quiet.png)
 
-**Fleet table** — LXC containers and QEMU VMs side by side: per-guest backup
-freshness, snapshot count, update scope + health-check, its scheduled **night +
-time**, and one-click Snapshot / Update / Purge / Edit. The example shows the
-whole fleet **spread across the week** (Mo–Su) with auto app-update (`app:auto`)
-and an auto health-check.
+**Fleet table** — LXC containers and QEMU VMs side by side (the `VM` tag marks a
+QEMU guest): per-guest backup freshness, snapshot count, update scope +
+health-check, its scheduled **night + time**, and one-click Snapshot / Update /
+Purge / Edit. The example shows the whole fleet **spread across the week** (Mo–Su)
+with auto app-update (`app:auto`) and an auto health-check.
 
 ![Fleet machines](docs/dashboard-machines.png)
 
@@ -50,6 +52,46 @@ grouping (one digest per service window, or one e-mail per machine) and the form
 rides your Proxmox mail transport — the SMTP server and credentials stay on the host.
 
 ![Notifications](docs/notifications.png)
+
+### The setup wizard
+
+First run (or **Settings → Wizard**) walks the whole fleet through five steps, with
+the *real* service window rendered live underneath every step — not a static
+preview, the actual timeline the panel uses everywhere else, updating as you tick
+boxes and change fields.
+
+**1 · Scan** — reads the host once and shows what it found: the fleet split into
+LXC/VM, backup coverage, every detected backup window (with its real learned
+duration) and what else competes for disk IO that night. VMs without a QEMU Guest
+Agent response are called out here, not discovered later at update time. Guests
+with **no backup at all** (`pbs`, `truenas` below) are flagged and excluded from
+auto-update by default — opt them in consciously.
+
+![Wizard — scan](docs/wizard-scan.png)
+
+**2 · Machines** — every guest is enrolled by default; untick the ones the schedule
+should **not** touch. This is live: unticking a guest drops it out of the service
+window underneath immediately, instead of only taking effect after finishing the
+wizard.
+
+![Wizard — machines](docs/wizard-machines.png)
+
+**3 · Schedule** — set the maintenance window, which nights it may use, and the
+**update pacing**: *fixed spacing* (each guest gets its own clock slot,
+`spacing_min` apart) or **cascade** (one lane, no fixed gap — every guest sharing a
+contiguous stretch of the night triggers at the same time and the host's single
+serial executor just runs them back to back, so a guest that finishes early never
+leaves the next one idling). Press **Propose** and the placement — including which
+guests didn't fit — appears live in the timeline below.
+
+![Wizard — schedule](docs/wizard-schedule.png)
+
+**4 · Scope + health** — the default policy for everyone with a fresh backup: OS
+security patches (with a **Windows Update scope** — all applicable updates, or just
+the Security + Critical classifications, for Windows guests), the application
+update convention, reboot behaviour, and the post-update health-check.
+
+![Wizard — scope and health](docs/wizard-scope-health.png)
 
 > Screenshots use anonymized demo data.
 
