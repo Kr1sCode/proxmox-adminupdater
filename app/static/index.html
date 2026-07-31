@@ -138,6 +138,7 @@
   .rlegend span{display:inline-flex;gap:7px;align-items:center}
   .sw{width:11px;height:11px;border-radius:3px;display:inline-block}
   .sw.backup{background:var(--crit)}.sw.hostu{background:var(--warn)}.sw.guest{background:var(--accent)}.sw.snap{background:#e08a2b}.sw.maint{background:var(--ink-mute)}
+  .sw.win{width:2px;border-radius:0;background:var(--good);box-shadow:0 0 4px var(--good)}
 
   /* per-row schedule gantt */
   .gantt{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--r);padding:14px 16px 12px}
@@ -185,6 +186,7 @@
   .gmark{position:absolute;top:8px;bottom:8px;width:5px;border-radius:3px}
   .gmark.crit{background:var(--crit)}.gmark.warn{background:var(--warn)}
   .gband.maintzone{background:repeating-linear-gradient(45deg,rgba(120,137,163,.16),rgba(120,137,163,.16) 5px,transparent 5px,transparent 10px);border-left:2px dotted var(--ink-mute);border-right:2px dotted var(--ink-mute)}
+  .gband.winedge{width:2px!important;border-radius:0;background:var(--good);box-shadow:0 0 4px var(--good);z-index:1}
   .fbtn{margin-left:auto;background:transparent;border:1px solid var(--border);color:var(--ink-mute);border-radius:6px;padding:2px 5px;cursor:pointer;line-height:1;flex:none}
   .fbtn:hover{border-color:var(--accent);color:var(--ink)}
   .fbtn.on{border-color:var(--crit);color:var(--crit);background:var(--crit-bg)}
@@ -383,6 +385,7 @@
         <span><i class="sw guest"></i> <span data-i18n="legGuest">LXC update</span></span>
         <span><i class="sw snap"></i> <span data-i18n="legSnap">Snapshot: create → prune</span></span>
         <span><i class="sw maint"></i> <span data-i18n="legMaint">Host maintenance (disk IO)</span></span>
+        <span><i class="sw win"></i> <span data-i18n="legWin">Update window edges (from Settings)</span></span>
       </div>
     </div>
   </section>
@@ -648,7 +651,8 @@ const I18N={
     ribbonTitle:'Service window',ribbonHint:'— backup windows (red) and the host update (amber) are fixed; LXC updates are laid out around them',
     wizUnplWarn:'{n} selected machines don’t fit the current service window ({days} day(s), {w1}–{w2}) — widen the window, add days, or shrink the spacing in step 3 "Schedule": ',
     ganttNoneTonight:'no backup this night',
-    legBackup:'Backup (never schedule here)',legHost:'Host update',legGuest:'LXC update',legSnap:'Snapshot: create → prune',legMaint:'Host maintenance (disk IO)',
+    legBackup:'Backup (never schedule here)',legHost:'Host update',legGuest:'LXC update',legSnap:'Snapshot: create → prune',legMaint:'Host maintenance (disk IO)',legWin:'Update window edges (from Settings)',
+    ganttWinStart:'Window start',ganttWinEnd:'Window end',
     ganttAvoid:'avoid this window (make it a forbidden zone)',ganttUnavoid:'stop avoiding this window',
     wizHostJobsTitle:'Other scheduled activity on the host',wizHostJobsNote:'Read-only — these compete for the host disks. On the timeline you can mark any of them “avoid” so updates keep clear.',wizHostJobsLight:'…and {n} light task(s).',wizHostJobsNone:'No heavy host maintenance detected.',
     windowTab:'Service window',machinesTitle:'LXC machines',rowHint:'click = details / policy',
@@ -756,7 +760,8 @@ const I18N={
     ribbonTitle:'Okno serwisowe',ribbonHint:'— okna backupu (czerwone) i aktualizacja hosta (pomarańczowa) są stałe; aktualizacje LXC układane są wokół nich',
     wizUnplWarn:'{n} zaznaczonych maszyn nie mieści się w obecnym oknie serwisowym ({days} dzień/dni, {w1}–{w2}) — poszerz okno, dodaj dni albo zmniejsz odstęp w kroku 3 „Harmonogram": ',
     ganttNoneTonight:'brak backupu tej nocy',
-    legBackup:'Backup (nie planuj tu aktualizacji)',legHost:'Aktualizacja hosta',legGuest:'Aktualizacja LXC',legSnap:'Migawka: utworzenie → prune',legMaint:'Konserwacja hosta (IO dysków)',
+    legBackup:'Backup (nie planuj tu aktualizacji)',legHost:'Aktualizacja hosta',legGuest:'Aktualizacja LXC',legSnap:'Migawka: utworzenie → prune',legMaint:'Konserwacja hosta (IO dysków)',legWin:'Granice okna aktualizacji (z Ustawień)',
+    ganttWinStart:'Początek okna',ganttWinEnd:'Koniec okna',
     ganttAvoid:'omijaj to okno (zrób z niego strefę zakazaną)',ganttUnavoid:'przestań omijać to okno',
     wizHostJobsTitle:'Inne zaplanowane zadania na hoście',wizHostJobsNote:'Tylko podgląd — konkurują o dyski hosta. Na osi czasu możesz oznaczyć dowolne „omijaj", by aktualizacje trzymały się z dala.',wizHostJobsLight:'…oraz {n} lekkich zadań.',wizHostJobsNone:'Nie wykryto ciężkiej konserwacji hosta.',
     windowTab:'Okno serwisowe',machinesTitle:'Maszyny LXC',rowHint:'klik = szczegóły / edycja polityki',
@@ -1033,6 +1038,17 @@ function renderGantt(d){
   const EF=d.extra_forbidden||{};
   for(const k in EF){const z=EF[k];if(z&&z.start_min!=null&&inAxis(z.start_min))
     bands+=`<div class="gband maintzone" style="left:${ribPct(z.start_min)}%;width:${Math.max(2,mPct((((z.end_min-z.start_min)%1440)+1440)%1440))}%"></div>`;}
+  // the configured update window itself (green edges) -- whatever is currently set in
+  // Settings/step 3, live: during a wizard proposal this reads the PROPOSED window (so
+  // typing a new start/end time or adding a day moves the lines immediately), otherwise
+  // the real saved one. Only drawn on a night the window actually applies to.
+  const mnt=wizPreviewing?((PLAN&&PLAN.maintenance)||{}):(DATA.maintenance||{});
+  const mntDays=(mnt.days&&mnt.days.length)?mnt.days:[6];
+  if(mntDays.includes(GDAY)){
+    const wsMin=hhmmToMin(mnt.window_start),weMin=hhmmToMin(mnt.window_end);
+    if(wsMin!=null&&inAxis(wsMin))bands+=`<div class="gband winedge" style="left:${ribPct(wsMin)}%" title="${t('ganttWinStart')}: ${fmtMin(wsMin)}"></div>`;
+    if(weMin!=null&&inAxis(weMin))bands+=`<div class="gband winedge" style="left:${ribPct(weMin)}%" title="${t('ganttWinEnd')}: ${fmtMin(weMin)}"></div>`;
+  }
   const track=inner=>`<div class="gtrack">${bands}${inner}</div>`;
 
   let html='';
