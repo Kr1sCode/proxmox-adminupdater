@@ -623,7 +623,7 @@ const I18N={
     ganttSnapC:'📷 snapshot',ganttSnapP:'🗑 prune',ganttNoEnabled:'No LXC has an update schedule yet — use “Plan schedule”.',
     wizHostTitle:'Update the PVE host itself',wizHostEnable:'Update the PVE host on a schedule',wizHostDays:'Day(s) of the host update',
     wizHostNote:'adminupdater runs this itself on the host (apt upgrade from host.conf → host_update_cmd, needs host_update=on) — it is not a third-party script. It shows as the amber row in the service window below; on a shared night the planner keeps LXC updates clear of it.',
-    kManaged:'Managed',kManagedS:'of {n} LXC on host',kCurrent:'Up to date',kCurrentS:'after last run',
+    kManaged:'Managed',kManagedS:'of {n} machines on host',kCurrent:'Up to date',kCurrentS:'after last run',
     kPending:'Pending',kPendingS:'scheduled soon',kProblems:'Problems',kProblemsS:'rollback / health-check',
     kCoverage:'Backup coverage',kCoverageS:'{a} / {b} have a fresh copy',kNext:'Next run',kNextS:'{n} machines',kNextNone:'no run',
     noWindows:'no backup window detected',noBackupPlan:'no backup → skipped',blockedNoBackup:'no backup → not touched',
@@ -679,7 +679,8 @@ const I18N={
     // wizard
     wizEyebrow:'Wizard · first run',wizTitle:"Let's schedule safe updates for your fleet",wizClose:'Close (finish later)',wizBack:'Back',wizFinish:'Finish',
     st1:'1 · Scan',st2:'2 · Machines',st3:'3 · Schedule',st4:'4 · Scope + health',st5:'5 · Notifications',
-    wizScanLead:'I scanned host {n}. Here is what I found:',scLxc:'LXC containers',scFresh:'have a fresh backup (< {h} h)',scSnaps:'snapshots total',scNoBk:'with no backup at all — risk',
+    wizScanLead:'I scanned host {n}. Here is what I found:',scLxc:'machines ({a} LXC + {b} VM)',scFresh:'have a fresh backup (< {h} h)',scSnaps:'snapshots total',scNoBk:'with no backup at all — risk',
+    scVmTitle:'Virtual machines found',scVmAgentOk:'agent OK',scVmAgentNone:'no agent',scVmAgentOff:'powered off',
     wizWinFound:'Detected backup window {w}',wizWinFoundN:'Detected {n} backup window(s) — avoiding all of them',wizAvoiding:'avoiding this window',wizWinNone:'No backup job detected yet — the host learns windows from real backups.',
     wizNoBkList:'No backup — kept out of auto-update',wizNoBkNote:"I won't auto-update machines without a copy. You can enable them consciously.",
     next2:'Next: backup coverage →',next3:'Next: schedule →',next4:'Next: scope + health →',next5:'Next: notifications →',
@@ -720,7 +721,7 @@ const I18N={
     ganttSnapC:'📷 migawka',ganttSnapP:'🗑 prune',ganttNoEnabled:'Żaden LXC nie ma jeszcze harmonogramu — użyj „Zaplanuj harmonogram".',
     wizHostTitle:'Aktualizacja samego hosta PVE',wizHostEnable:'Aktualizuj hosta PVE wg harmonogramu',wizHostDays:'Dzień(dni) aktualizacji hosta',
     wizHostNote:'adminupdater robi to sam na hoście (apt upgrade z host.conf → host_update_cmd, wymaga host_update=on) — to NIE zewnętrzny skrypt. Pokazuje się jako pomarańczowy wiersz w oknie serwisowym poniżej; w tę samą noc planer trzyma aktualizacje LXC z dala od tego slotu.',
-    kManaged:'Zarządzane',kManagedS:'z {n} LXC na hoście',kCurrent:'Aktualne',kCurrentS:'po ostatnim runie',
+    kManaged:'Zarządzane',kManagedS:'z {n} maszyn na hoście',kCurrent:'Aktualne',kCurrentS:'po ostatnim runie',
     kPending:'Oczekują',kPendingS:'zaplanowane wkrótce',kProblems:'Problemy',kProblemsS:'rollback / health-check',
     kCoverage:'Pokrycie backupem',kCoverageS:'{a} / {b} ma świeżą kopię',kNext:'Najbliższy run',kNextS:'{n} maszyn',kNextNone:'brak runu',
     noWindows:'nie wykryto okna backupu',noBackupPlan:'brak backupu → pominięte',blockedNoBackup:'bez backupu → nie ruszam',
@@ -775,7 +776,8 @@ const I18N={
     rbMb:'Podnieś do co najmniej (MB)',
     wizEyebrow:'Kreator · pierwsze uruchomienie',wizTitle:'Ułóżmy bezpieczne aktualizacje Twojej floty',wizClose:'Zamknij (dokończę później)',wizBack:'Wstecz',wizFinish:'Zakończ',
     st1:'1 · Skan',st2:'2 · Maszyny',st3:'3 · Harmonogram',st4:'4 · Zakres + health',st5:'5 · Powiadomienia',
-    wizScanLead:'Przeskanowałem hosta {n}. Oto co znalazłem:',scLxc:'kontenerów LXC',scFresh:'ma świeży backup (< {h} h)',scSnaps:'migawek łącznie',scNoBk:'bez żadnej kopii — ryzyko',
+    wizScanLead:'Przeskanowałem hosta {n}. Oto co znalazłem:',scLxc:'maszyn ({a} LXC + {b} VM)',scFresh:'ma świeży backup (< {h} h)',scSnaps:'migawek łącznie',scNoBk:'bez żadnej kopii — ryzyko',
+    scVmTitle:'Znalezione maszyny wirtualne',scVmAgentOk:'agent OK',scVmAgentNone:'brak agenta',scVmAgentOff:'wyłączona',
     wizWinFound:'Wykryto okno backupu {w}',wizWinFoundN:'Wykryto {n} okien backupu — omijam wszystkie',wizAvoiding:'omijam to okno',wizWinNone:'Nie wykryto jeszcze zadania backupu — host uczy się okien z realnych kopii.',
     wizNoBkList:'Brak backupu — pomijam z auto-update',wizNoBkNote:'Nie planuję automatycznych aktualizacji maszyn bez kopii. Możesz włączyć świadomie.',
     next2:'Dalej: pokrycie backupem →',next3:'Dalej: harmonogram →',next4:'Dalej: zakres + health →',next5:'Dalej: powiadomienia →',
@@ -1468,15 +1470,22 @@ function renderWiz(){
   const snapsTotal=g.reduce((s,x)=>s+(x.snapshots||0),0);
   const freshH=SET.backup_fresh_hours||24;
   const node=(DATA.host&&DATA.host.pve)?DATA.host.pve:'PVE';
+  const vms=g.filter(x=>x.gtype==='qemu'),lxcN=total-vms.length;
   if(WSTEP===1){
     const wins=inv.windows||[];
     b.innerHTML=`<p style="color:var(--ink-dim)">${t('wizScanLead',{n:`<b class="mono">${node}</b>`})}</p>
       <div class="scan">
-        <div class="scancard"><div class="n mono">${total}</div><div class="l">${t('scLxc')}</div></div>
+        <div class="scancard"><div class="n mono">${total}</div><div class="l">${t('scLxc',{a:lxcN,b:vms.length})}</div></div>
         <div class="scancard"><div class="n mono">${fresh}&nbsp;/&nbsp;${total}</div><div class="l">${t('scFresh',{h:freshH})}</div></div>
         <div class="scancard"><div class="n mono">${snapsTotal}</div><div class="l">${t('scSnaps')}</div></div>
         <div class="scancard"><div class="n mono" style="color:${noBk.length?'var(--crit)':'var(--good)'}">${noBk.length}</div><div class="l">${t('scNoBk')}</div></div>
       </div>
+      ${vms.length?`<div class="prop"><b>${t('scVmTitle')}</b>
+        <div class="covlist" style="margin-top:.5rem">${vms.map(x=>{
+          const ag=x.status!=='running'?t('scVmAgentOff'):(x.agent_ok===false?t('scVmAgentNone'):t('scVmAgentOk'));
+          const agCls=x.status!=='running'?'idle':(x.agent_ok===false?'crit':'good');
+          return `<div class="r"><span>${osIcon(x.os)} ${x.name||''} <span class="muted mono">${x.vmid}</span></span><span class="chip ${agCls}">${ag}</span></div>`;
+        }).join('')}</div></div>`:''}
       ${wins.length?`<div class="prop"><div class="row"><b>${t('wizWinFoundN',{n:wins.length})}</b><span class="toggle">${t('wizAvoiding')}</span></div>
         <div class="covlist" style="margin-top:.5rem">${wins.map(w=>`<div class="r"><span>${ic('database','crit')} <b class="mono">${fmtMin(w.start_min)}–${fmtMin(w.end_min)}</b> <span class="muted">${w.days?wdList(w.days):t('ganttDaily')}</span></span><span class="muted mono">${w.storage||''}</span></div>`).join('')}</div>
         <div class="note">${t('ribbonHint').replace(/^—\s*/,'')}</div></div>`
