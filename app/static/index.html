@@ -372,6 +372,7 @@
     <div class="kpis" id="kpis"></div>
 
     <div class="sec"><h2 data-i18n="ribbonTitle">Service window</h2><span class="hint" id="ribbonHint"></span></div>
+    <div class="note" id="wizUnplBanner" style="display:none;color:var(--warn);background:var(--warn-bg);padding:.5rem .7rem;border-radius:8px;margin-bottom:.5rem"></div>
     <div class="daytabs" id="ganttDays"></div>
     <div class="gantt">
       <div class="gantt-axis" id="ganttAxis"></div>
@@ -645,6 +646,7 @@ const I18N={
     edit:'Edit',disabled:'disabled',allDays:'daily',paused:'paused',
     refresh:'Refresh',autoLbl:'auto (5 s)',logMeta:'last 200 lines',empty:'(empty)',
     ribbonTitle:'Service window',ribbonHint:'— backup windows (red) and the host update (amber) are fixed; LXC updates are laid out around them',
+    wizUnplWarn:'{n} selected machines don’t fit the current service window ({days} day(s), {w1}–{w2}) — widen the window, add days, or shrink the spacing in step 3 "Schedule": ',
     ganttNoneTonight:'no backup this night',
     legBackup:'Backup (never schedule here)',legHost:'Host update',legGuest:'LXC update',legSnap:'Snapshot: create → prune',legMaint:'Host maintenance (disk IO)',
     ganttAvoid:'avoid this window (make it a forbidden zone)',ganttUnavoid:'stop avoiding this window',
@@ -752,6 +754,7 @@ const I18N={
     edit:'Edytuj',disabled:'wyłączony',allDays:'codz.',paused:'pauza',
     refresh:'Odśwież',autoLbl:'auto (5 s)',logMeta:'ostatnie 200 linii',empty:'(pusto)',
     ribbonTitle:'Okno serwisowe',ribbonHint:'— okna backupu (czerwone) i aktualizacja hosta (pomarańczowa) są stałe; aktualizacje LXC układane są wokół nich',
+    wizUnplWarn:'{n} zaznaczonych maszyn nie mieści się w obecnym oknie serwisowym ({days} dzień/dni, {w1}–{w2}) — poszerz okno, dodaj dni albo zmniejsz odstęp w kroku 3 „Harmonogram": ',
     ganttNoneTonight:'brak backupu tej nocy',
     legBackup:'Backup (nie planuj tu aktualizacji)',legHost:'Aktualizacja hosta',legGuest:'Aktualizacja LXC',legSnap:'Migawka: utworzenie → prune',legMaint:'Konserwacja hosta (IO dysków)',
     ganttAvoid:'omijaj to okno (zrób z niego strefę zakazaną)',ganttUnavoid:'przestań omijać to okno',
@@ -984,6 +987,20 @@ function renderGantt(d){
   // yet, so an unticked machine visibly drops out immediately, not only once placed.
   const wizPreviewing=WIZPREVIEW||(WSEL&&!el('wiz').hidden);
   el('ribbonHint').textContent=wizPreviewing?('● '+t('wizPreviewBadge')):((inv.windows&&inv.windows.length)?t('ribbonHint'):'— '+t('noWindows'));
+
+  // machines you TICKED on step 2 that the current window/spacing simply can't fit --
+  // otherwise they just silently vanish from the timeline below with no explanation
+  // (this is what looked like a bug: a selected VM missing with nothing said about why).
+  const wb=el('wizUnplBanner');
+  if(wb){
+    const unpl=wizPreviewing?((PLAN&&PLAN.unplaceable)||[]):[];
+    if(unpl.length){
+      const names=unpl.map(v=>{const gg=(DATA.guests||[]).find(x=>x.vmid===v);return gg?gg.name:v;}).join(', ');
+      const mnt=(PLAN&&PLAN.maintenance)||{};
+      wb.style.display='';
+      wb.innerHTML=t('wizUnplWarn',{n:unpl.length,days:(mnt.days||[]).length,w1:mnt.window_start||'',w2:mnt.window_end||''})+`<b>${names}</b>`;
+    }else wb.style.display='none';
+  }
 
   // --- week view: pick which night to show (chips = per-night machine counts) ---
   const gwd=x=>(x.config.weekdays&&x.config.weekdays.length)?(x.config.weekdays[0]%7):6;
