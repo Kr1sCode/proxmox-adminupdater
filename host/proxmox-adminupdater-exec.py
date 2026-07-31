@@ -88,6 +88,19 @@ def run(cmd, timeout):
         return 124, f"timeout after {timeout}s"
 
 
+# Many community-scripts LXC templates print a colourful ANSI banner (app name,
+# "Provided by", OS/hostname/IP) from /etc/profile.d/* on every LOGIN shell -- a
+# `pct exec ... -- bash -lc "..."` triggers it same as an interactive `pct enter`
+# would. The escape bytes don't render in a plain-text dialog/e-mail, they just
+# show up as literal "[1m", "[33m" garbage. Strip them from anything a guest
+# actually produced before it's stored/displayed anywhere.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b[()][A-Za-z0-9]")
+
+
+def _strip_ansi(s):
+    return _ANSI_RE.sub("", s) if s else s
+
+
 def _sh(cmd, t=25):
     try:
         return subprocess.run(cmd, capture_output=True, text=True, timeout=t).stdout
@@ -110,7 +123,8 @@ class LxcDriver:
         return "running" in _sh(["pct", "status", self.id], 15)
 
     def exec(self, argv, timeout):
-        return run(["pct", "exec", self.id, "--", *argv], timeout)
+        rc, out = run(["pct", "exec", self.id, "--", *argv], timeout)
+        return rc, _strip_ansi(out)
 
     def alive_probe(self):
         return self.exec(["true"], 30)[0] == 0
@@ -182,7 +196,7 @@ class QemuDriver:
         exitcode = int(data.get("exitcode", 1) or 0)
         if err_data.startswith("#< CLIXML") and exitcode == 0:
             err_data = ""   # PowerShell progress-stream noise on success, not a real error
-        return exitcode, out_data + err_data
+        return exitcode, _strip_ansi(out_data + err_data)
 
     def snapshot(self, name, description):
         # --vmstate 0: disk-only, no RAM dump -- fast, matches pct snapshot's semantics
@@ -334,22 +348,26 @@ def build_check_updates(d):
     """Read-only probe: what's available but NOT installed. Never downloads or
     installs anything -- safe to run on demand from the panel without touching
     the guest. Each branch normalizes to exit 0 (the text itself carries the
-    result, including a distinguishable 'OK:' line when nothing is pending)."""
+    result, including a distinguishable 'OK:' line when nothing is pending).
+    A plain (non-login) shell -- package managers don't need /etc/profile.d, and
+    a LOGIN shell is exactly what triggers a community-scripts container's
+    colourful "Provided by / OS / Hostname / IP" welcome banner ahead of the
+    real answer (same thing `pct enter` shows); -c skips all of that noise."""
     if d in ("debian", "ubuntu"):
-        return ["bash", "-lc",
+        return ["bash", "-c",
                 "apt-get update -qq >/dev/null 2>&1; "
                 "n=$(apt list --upgradable 2>/dev/null | tail -n +2); "
                 "if [ -z \"$n\" ]; then echo 'OK: brak zaleglych aktualizacji'; else echo \"$n\"; fi"]
     if d == "alpine":
-        return ["ash", "-lc",
+        return ["ash", "-c",
                 "apk update -q >/dev/null 2>&1; n=$(apk list -u 2>/dev/null); "
                 "if [ -z \"$n\" ]; then echo 'OK: brak zaleglych aktualizacji'; else echo \"$n\"; fi"]
     if d in ("arch", "archarm"):
-        return ["bash", "-lc",
+        return ["bash", "-c",
                 "pacman -Sy --noconfirm -q >/dev/null 2>&1; n=$(pacman -Qu 2>/dev/null); "
                 "if [ -z \"$n\" ]; then echo 'OK: brak zaleglych aktualizacji'; else echo \"$n\"; fi"]
     if d in ("fedora", "rhel", "centos", "rocky", "almalinux"):
-        return ["bash", "-lc",
+        return ["bash", "-c",
                 "n=$( (dnf check-update -q 2>/dev/null || yum check-update -q 2>/dev/null) "
                 "| grep -v '^$' | grep -vi '^Last metadata'); "
                 "if [ -z \"$n\" ]; then echo 'OK: brak zaleglych aktualizacji'; else echo \"$n\"; fi"]
