@@ -2,14 +2,22 @@
 """proxmox-adminupdater host-side executor.
 
 The ONLY component on the Proxmox host. Stateless and dumb: pulls a plan from the
-adminupdater LXC, runs `pct snapshot` + `pct exec` per job, posts results back.
+adminupdater LXC, runs the right per-guest-type commands, posts results back.
 All policy lives in the LXC EXCEPT the ctid whitelist, which is ALSO enforced
 here -- a compromised LXC can at most request security-patch / app-update on a
 ctid the host itself already allows, never host root and never a raw command.
 
-Runs as root (needs pct). stdlib only -- PVE ships python3.
+Guests come in two flavours, each behind a small Driver with the same interface
+(exec/snapshot/rollback/start/stop/detect_os/...): LXC via `pct`, QEMU VMs via
+`qm` + the QEMU Guest Agent (works for both Linux and Windows guests). The host
+resolves a ctid's REAL type itself (`pct status` then `qm status`) rather than
+trusting a type claim from the plan -- the plan only ever carries ctid + an
+action enum, exactly as before.
+
+Runs as root (needs pct/qm). stdlib only -- PVE ships python3.
 """
 
+import base64
 import configparser
 import json
 import os
@@ -75,12 +83,215 @@ def run(cmd, timeout):
         return 124, f"timeout after {timeout}s"
 
 
-def detect_distro(ctid):
-    _, out = run(["pct", "exec", str(ctid), "--", "cat", "/etc/os-release"], 30)
-    for line in out.splitlines():
-        if line.startswith("ID="):
-            return line.split("=", 1)[1].strip().strip('"')
-    return "unknown"
+def _sh(cmd, t=25):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=t).stdout
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+# ---- per-guest-type drivers --------------------------------------------------
+# Same interface for LXC (pct) and QEMU (qm + QEMU Guest Agent), so do_job() and
+# everything downstream of it (snapshot/rollback/reboot/health-check/app-update)
+# doesn't need to know which one it's talking to.
+
+class LxcDriver:
+    kind = "lxc"
+
+    def __init__(self, vmid):
+        self.id = str(vmid)
+
+    def running(self):
+        return "running" in _sh(["pct", "status", self.id], 15)
+
+    def exec(self, argv, timeout):
+        return run(["pct", "exec", self.id, "--", *argv], timeout)
+
+    def alive_probe(self):
+        return self.exec(["true"], 30)[0] == 0
+
+    def snapshot(self, name, description):
+        return run(["pct", "snapshot", self.id, name, "--description", description], 300)
+
+    def rollback(self, name, timeout):
+        return run(["pct", "rollback", self.id, name], timeout)
+
+    def listsnapshot(self):
+        return run(["pct", "listsnapshot", self.id], 60)
+
+    def delsnapshot(self, name):
+        return run(["pct", "delsnapshot", self.id, name], 120)
+
+    def start(self, timeout):
+        return run(["pct", "start", self.id], timeout)
+
+    def stop(self, timeout):
+        return run(["pct", "stop", self.id], timeout)
+
+    def reboot(self, timeout):
+        return run(["pct", "reboot", self.id], timeout)
+
+    def detect_os(self):
+        _, out = self.exec(["cat", "/etc/os-release"], 30)
+        for line in out.splitlines():
+            if line.startswith("ID="):
+                return line.split("=", 1)[1].strip().strip('"')
+        return "unknown"
+
+    def push_file(self, local_path, dest, perms="700"):
+        return run(["pct", "push", self.id, local_path, dest, "--perms", perms], 60)
+
+
+class QemuDriver:
+    kind = "qemu"
+
+    def __init__(self, vmid):
+        self.id = str(vmid)
+
+    def running(self):
+        return "status: running" in _sh(["qm", "status", self.id], 15)
+
+    def agent_ready(self, timeout=10):
+        return run(["qm", "agent", self.id, "ping"], timeout)[0] == 0
+
+    def alive_probe(self):
+        return self.agent_ready()
+
+    def exec(self, argv, timeout):
+        # `qm guest exec` is synchronous by default (--synchronous 1): it blocks and
+        # returns the guest's exit code + output as JSON in one call. Give the
+        # subprocess itself a little headroom over --timeout so qm gets to return
+        # its own timeout message instead of us hard-killing it mid-response.
+        rc, out = run(["qm", "guest", "exec", self.id, "--timeout", str(timeout),
+                       "--", *argv], timeout + 30)
+        if rc != 0:
+            return 1, (out.strip() or f"qm guest exec nieudany (rc={rc})")
+        try:
+            data = json.loads(out)
+        except ValueError:
+            return 1, out
+        if not data.get("exited"):
+            return 124, "guest agent nie zwrócił wyniku w czasie (timeout)"
+        out_data = data.get("out-data") or ""
+        err_data = data.get("err-data") or ""
+        exitcode = int(data.get("exitcode", 1) or 0)
+        if err_data.startswith("#< CLIXML") and exitcode == 0:
+            err_data = ""   # PowerShell progress-stream noise on success, not a real error
+        return exitcode, out_data + err_data
+
+    def snapshot(self, name, description):
+        # --vmstate 0: disk-only, no RAM dump -- fast, matches pct snapshot's semantics
+        # (LXC snapshots never carry memory state either).
+        return run(["qm", "snapshot", self.id, name, "--vmstate", "0",
+                    "--description", description], 300)
+
+    def rollback(self, name, timeout):
+        return run(["qm", "rollback", self.id, name], timeout)
+
+    def listsnapshot(self):
+        return run(["qm", "listsnapshot", self.id], 60)
+
+    def delsnapshot(self, name):
+        return run(["qm", "delsnapshot", self.id, name], 120)
+
+    def start(self, timeout):
+        return run(["qm", "start", self.id], timeout)
+
+    def stop(self, timeout):
+        return run(["qm", "stop", self.id], timeout)
+
+    def reboot(self, timeout):
+        return run(["qm", "reboot", self.id], timeout)
+
+    def detect_os(self):
+        rc, out = run(["qm", "guest", "cmd", self.id, "get-osinfo"], 15)
+        if rc != 0:
+            return "unknown"
+        try:
+            data = json.loads(out)
+        except ValueError:
+            return "unknown"
+        osid = str(data.get("id") or "").strip().lower()
+        if osid in ("mswindows", "windows"):
+            return "windows"
+        return osid or "unknown"
+
+
+def resolve_driver(ctid):
+    """Ground truth for what a ctid actually is -- probed on the host, never taken
+    on faith from the plan. A guest that answers neither pct nor qm is rejected."""
+    if run(["pct", "status", str(ctid)], 15)[0] == 0:
+        return LxcDriver(ctid)
+    if run(["qm", "status", str(ctid)], 15)[0] == 0:
+        return QemuDriver(ctid)
+    return None
+
+
+def _win_encoded(script):
+    """Windows guest agent has no file-write in the `qm` CLI, so built-in scripts
+    and recipes alike are handed over as a single -EncodedCommand argument (the
+    standard way to run ad-hoc PowerShell without touching disk)."""
+    b64 = base64.b64encode(script.encode("utf-16-le")).decode()
+    return ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy",
+            "Bypass", "-EncodedCommand", b64]
+
+
+# ---- built-in Windows Update (COM API, no external module) -------------------
+WIN_UPDATE_PS = r"""
+$ProgressPreference = 'SilentlyContinue'
+$ErrorActionPreference = 'Stop'
+try {
+    $session = New-Object -ComObject Microsoft.Update.Session
+    $searcher = $session.CreateUpdateSearcher()
+    $result = $searcher.Search("IsInstalled=0 and IsHidden=0")
+    if ($result.Updates.Count -eq 0) {
+        Write-Output "brak dostepnych aktualizacji / no updates available"
+        exit 0
+    }
+    $toDownload = New-Object -ComObject Microsoft.Update.UpdateColl
+    foreach ($u in $result.Updates) { [void]$toDownload.Add($u) }
+    $downloader = $session.CreateUpdateDownloader()
+    $downloader.Updates = $toDownload
+    $dlResult = $downloader.Download()
+    Write-Output "Download ResultCode: $($dlResult.ResultCode)"
+    $toInstall = New-Object -ComObject Microsoft.Update.UpdateColl
+    foreach ($u in $result.Updates) { if ($u.IsDownloaded) { [void]$toInstall.Add($u) } }
+    if ($toInstall.Count -eq 0) {
+        Write-Output "nic nie pobrano poprawnie / nothing downloaded successfully"
+        exit 1
+    }
+    $installer = $session.CreateUpdateInstaller()
+    $installer.Updates = $toInstall
+    $instResult = $installer.Install()
+    Write-Output "Install ResultCode: $($instResult.ResultCode) RebootRequired: $($instResult.RebootRequired)"
+    for ($i = 0; $i -lt $toInstall.Count; $i++) {
+        $u = $toInstall.Item($i)
+        $r = $instResult.GetUpdateResult($i)
+        Write-Output ("{0} -> resultCode={1} hresult={2}" -f $u.Title, $r.ResultCode, $r.HResult)
+    }
+    # ResultCode: 2=Succeeded, 3=SucceededWithErrors, 4=Failed, 5=Aborted
+    if ($instResult.ResultCode -eq 2 -or $instResult.ResultCode -eq 3) { exit 0 } else { exit 1 }
+} catch {
+    Write-Output "BLAD/ERROR: $($_.Exception.Message)"
+    exit 1
+}
+"""
+
+WIN_REBOOT_CHECK_PS = (
+    "$a = Test-Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\WindowsUpdate\\Auto Update\\RebootRequired'; "
+    "$b = Test-Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\RebootPending'; "
+    "if ($a -or $b) { exit 0 } else { exit 1 }"
+)
+
+WIN_HEALTH_AUTO_PS = (
+    "$ProgressPreference='SilentlyContinue'; "
+    "$s = Get-Service RpcSs, Winmgmt -ErrorAction SilentlyContinue; "
+    "if (-not $s -or ($s | Where-Object Status -ne 'Running')) { exit 1 } else { exit 0 }"
+)
+
+
+def detect_distro(driver):
+    return driver.detect_os()
 
 
 def build_security_patch(d):
@@ -94,6 +305,10 @@ def build_security_patch(d):
         return ["ash", "-lc", "apk update && apk upgrade --no-cache"]
     if d in ("arch", "archarm"):
         return ["bash", "-lc", "pacman -Syu --noconfirm"]
+    if d in ("fedora", "rhel", "centos", "rocky", "almalinux"):
+        return ["bash", "-lc", "dnf -y upgrade || yum -y update"]
+    if d == "windows":
+        return _win_encoded(WIN_UPDATE_PS)
     return None
 
 
@@ -101,12 +316,12 @@ def _safe_name(app):
     return bool(app) and all(c.isalnum() or c in "-._" for c in app) and app[0].isalnum()
 
 
-def build_app_update(cfg, ctid, app, distro="debian"):
+def build_app_update(cfg, driver, app, distro="debian"):
     # "auto" = community-scripts behaviour: run the container's own /usr/bin/update
-    # helper (present in helper-script CTs). Faithful to tools/pve/update-apps.sh:
-    # PHS_SILENT=1 for unattended, TERM=dumb + a no-op `clear` on PATH (no TTY),
-    # and a clean skip (exit 0) when the CT is not a helper-script container.
+    # helper. LXC-only -- there is no such convention for a VM.
     if app == "auto":
+        if driver.kind != "lxc":
+            return None
         shell = "ash" if distro == "alpine" else "bash"
         # Run `update` with stdin from /dev/null and its output redirected to a FILE,
         # not our capture pipe. Community-scripts updaters often (re)start the app as
@@ -126,18 +341,32 @@ def build_app_update(cfg, ctid, app, distro="debian"):
         return [shell, "-lc", script]
     if not _safe_name(app):
         return None
-    recipe = os.path.join(cfg["recipes_dir"], f"{app}.sh")
+    ext = ".ps1" if distro == "windows" else ".sh"
+    recipe = os.path.join(cfg["recipes_dir"], f"{app}{ext}")
     if not os.path.isfile(recipe):
         return None
-    dest = "/tmp/.adminupdater-recipe.sh"
-    rc, _ = run(["pct", "push", str(ctid), recipe, dest, "--perms", "700"], 60)
-    if rc != 0:
+    if driver.kind == "lxc":
+        dest = "/tmp/.adminupdater-recipe.sh"
+        rc, _ = driver.push_file(recipe, dest, "700")
+        if rc != 0:
+            return None
+        return ["bash", "-lc", f"{dest}; rc=$?; rm -f {dest}; exit $rc"]
+    # QEMU: `qm` has no file-write CLI -> embed the recipe content directly, same
+    # trick as the built-in Windows Update script (base64 argv, nothing touches disk
+    # on the host side, and the guest never has a dangling script file to clean up).
+    try:
+        content = open(recipe, encoding="utf-8").read()
+    except OSError:
         return None
-    return ["bash", "-lc", f"{dest}; rc=$?; rm -f {dest}; exit $rc"]
+    if distro == "windows":
+        return _win_encoded(content)
+    b64 = base64.b64encode(content.encode()).decode()
+    return ["bash", "-lc", f"echo {b64} | base64 -d | bash -s --; exit $?"]
 
 
 def _ct_memory(ctid):
-    """Current memory limit (MB) of a container, read from `pct config`. None on error."""
+    """Current memory limit (MB) of an LXC container, read from `pct config`. None on
+    error. LXC-only -- there's no equivalent RAM-boost mechanism wired up for VMs yet."""
     rc, out = run(["pct", "config", str(ctid)], 30)
     if rc != 0:
         return None
@@ -145,8 +374,8 @@ def _ct_memory(ctid):
     return int(m.group(1)) if m else None
 
 
-def maybe_ram_boost(cfg, ctid, job, actions):
-    """Temporarily raise a container's RAM for the memory-heavy app-update BUILD step
+def maybe_ram_boost(cfg, driver, job, actions):
+    """Temporarily raise an LXC's RAM for the memory-heavy app-update BUILD step
     (npm install / from-source compiles OOM at tight limits — that's rc=137, and some
     community-scripts updaters self-abort with rc=113 when under-provisioned).
 
@@ -155,17 +384,19 @@ def maybe_ram_boost(cfg, ctid, job, actions):
     is already generous. Returns {"from": MB, "to": MB} when a boost was applied (so the
     report/e-mail can show it), else None. The caller restores in a finally, whatever
     happens — a crash, a rollback or a normal finish all put the RAM back."""
+    if driver.kind != "lxc":
+        return None   # no analogous mechanism wired up for QEMU yet
     rb = job.get("ram_boost") or {}
     if not rb.get("enabled") or "app-update" not in actions:
         return None
-    cur = _ct_memory(ctid)
+    cur = _ct_memory(driver.id)
     if cur is None:
         return None
     cap = int(cfg.get("ram_boost_max_mb", 8192))
     target = min(max(int(rb.get("mb") or 0), cur), cap)   # raise toward the floor, never past the cap
     if target <= cur:
         return None                                       # already has enough — nothing to do
-    rc, _ = run(["pct", "set", str(ctid), "-memory", str(target)], 60)
+    rc, _ = run(["pct", "set", driver.id, "-memory", str(target)], 60)
     return {"from": cur, "to": target} if rc == 0 else None
 
 
@@ -175,55 +406,58 @@ def restore_ram(ctid, mb):
     run(["pct", "set", str(ctid), "-memory", str(int(mb))], 60)
 
 
-def _ct_running(ctid):
-    return "running" in _sh(["pct", "status", str(ctid)], 15)
-
-
-def start_and_wait(ctid, timeout, wait=120):
-    """Start a stopped container and wait until it actually accepts commands, so the
+def start_and_wait(driver, timeout, wait=120):
+    """Start a stopped guest and wait until it actually accepts commands, so the
     update doesn't fire into a half-booted guest. Returns (ok, log)."""
     t0 = time.time()
-    rc, out = run(["pct", "start", str(ctid)], timeout)
+    rc, out = driver.start(timeout)
     if rc != 0:
-        return False, "pct start nieudany: " + out[-500:]
+        return False, "start nieudany: " + out[-500:]
     deadline = time.time() + wait
     while time.time() < deadline:
-        if _ct_running(ctid) and run(["pct", "exec", str(ctid), "--", "true"], 30)[0] == 0:
-            return True, f"kontener wystartowany na czas aktualizacji ({int(time.time() - t0)}s)"
+        if driver.running() and driver.alive_probe():
+            return True, f"maszyna wystartowana na czas aktualizacji ({int(time.time() - t0)}s)"
         time.sleep(3)
-    return False, f"kontener nie wstał w {wait}s"
+    return False, f"maszyna nie wstała w {wait}s"
 
 
-def snapshot(ctid, prefix):
+def snapshot(driver, prefix):
     name = f"{prefix}_{datetime.now():%Y%m%d_%H%M%S}"
-    rc, out = run(["pct", "snapshot", str(ctid), name,
-                   "--description", "proxmox-adminupdater pre-update"], 300)
+    rc, out = driver.snapshot(name, "proxmox-adminupdater pre-update")
     return (name if rc == 0 else None), out
 
 
-def rollback(ctid, snap, timeout):
-    rc, _ = run(["pct", "rollback", str(ctid), snap], timeout)
+def rollback(driver, snap, timeout):
+    rc, _ = driver.rollback(snap, timeout)
     return rc == 0
 
 
-def reboot_and_verify(ctid, timeout, wait=150):
-    """Reboot a container and confirm it comes back and is responsive. Returns
+def reboot_and_verify(driver, timeout, wait=150):
+    """Reboot a guest and confirm it comes back and is responsive. Returns
     (ok, log). Used after an update when the guest opted into auto-reboot AND the
-    update left /var/run/reboot-required. If it never returns, the caller rolls
+    update left a reboot-required marker. If it never returns, the caller rolls
     back — so a wedged reboot is caught, not left broken."""
     t0 = time.time()
-    rc, out = run(["pct", "reboot", str(ctid)], timeout)
+    rc, _ = driver.reboot(timeout)
     if rc != 0:  # some setups need an explicit stop/start
-        run(["pct", "stop", str(ctid)], timeout)
-        run(["pct", "start", str(ctid)], timeout)
+        driver.stop(timeout)
+        driver.start(timeout)
     deadline = time.time() + wait
     while time.time() < deadline:
-        if "running" in _sh(["pct", "status", str(ctid)], 15):
-            rc2, _ = run(["pct", "exec", str(ctid), "--", "true"], 30)
-            if rc2 == 0:
-                return True, f"restart OK, wrócił po {int(time.time() - t0)}s"
+        if driver.running() and driver.alive_probe():
+            return True, f"restart OK, wrócił po {int(time.time() - t0)}s"
         time.sleep(3)
-    return False, f"kontener nie wrócił po restarcie w {wait}s"
+    return False, f"maszyna nie wróciła po restarcie w {wait}s"
+
+
+def reboot_required(driver, distro):
+    """rc==0 means 'a reboot is pending', matching the Linux /var/run/reboot-required
+    convention. Windows has no such file -- read the registry markers WU/CBS set."""
+    if distro == "windows":
+        rc, _ = driver.exec(_win_encoded(WIN_REBOOT_CHECK_PS), 30)
+        return rc
+    rc, _ = driver.exec(["test", "-e", "/var/run/reboot-required"], 30)
+    return rc
 
 
 def _snap_epoch(name):
@@ -236,16 +470,16 @@ def _snap_epoch(name):
         return 0
 
 
-def prune_snapshots(ctid, prefix, keep, max_age_days):
+def prune_snapshots(driver, prefix, keep, max_age_days):
     """Delete old managed snapshots. ONLY names matching ^<prefix>_\\d{8}_\\d{6}$
     are ever touched (re-checked right before each delete), so manual snapshots
     and autosnap's auto_* are physically incapable of matching. Time is read
-    from the name itself, so no date parsing of `pct listsnapshot` is needed."""
+    from the name itself, so no date parsing of `pct/qm listsnapshot` is needed."""
     keep, max_age_days = int(keep or 0), int(max_age_days or 0)
     if keep <= 0 and max_age_days <= 0:
         return []
     rx = re.compile(r"^" + re.escape(prefix) + r"_\d{8}_\d{6}$")
-    rc, out = run(["pct", "listsnapshot", str(ctid)], 60)
+    rc, out = driver.listsnapshot()
     if rc != 0:
         return []
     names = sorted({t for t in re.findall(r"[A-Za-z0-9_]+", out) if rx.match(t)})
@@ -259,17 +493,17 @@ def prune_snapshots(ctid, prefix, keep, max_age_days):
     for n in sorted(to_del):
         if not rx.match(n):        # belt-and-suspenders
             continue
-        rc, _ = run(["pct", "delsnapshot", str(ctid), n], 120)
+        rc, _ = driver.delsnapshot(n)
         if rc == 0:
             deleted.append(n)
     return deleted
 
 
-def purge_managed(ctid, prefixes):
+def purge_managed(driver, prefixes):
     """Delete ALL managed snapshots for the given prefixes. Same strict regex as
     prune_snapshots -- only ^<prefix>_\\d{8}_\\d{6}$ can ever match, re-checked
     right before each delete, so manual snapshots are physically safe."""
-    rc, out = run(["pct", "listsnapshot", str(ctid)], 60)
+    rc, out = driver.listsnapshot()
     if rc != 0:
         return [], "listsnapshot nieudany: " + out[-300:]
     deleted = []
@@ -280,13 +514,13 @@ def purge_managed(ctid, prefixes):
         for n in sorted({t for t in re.findall(r"[A-Za-z0-9_]+", out) if rx.match(t)}):
             if not rx.match(n):        # belt-and-suspenders
                 continue
-            drc, _ = run(["pct", "delsnapshot", str(ctid), n], 120)
+            drc, _ = driver.delsnapshot(n)
             if drc == 0:
                 deleted.append(n)
     return deleted, ""
 
 
-def build_health_check(hc):
+def build_health_check(hc, distro=None):
     """Structured post-update probe -> a command, built HOST-side from a
     type+arg. No raw command string ever crosses from the LXC."""
     t = (hc or {}).get("type", "none")
@@ -294,7 +528,9 @@ def build_health_check(hc):
     if t == "none":
         return None
     if t == "auto":
-        # Universal, no-arg liveness probe that fits ANY LXC: if the guest runs
+        if distro == "windows":
+            return _win_encoded(WIN_HEALTH_AUTO_PS)
+        # Universal, no-arg liveness probe that fits ANY Linux guest: if it runs
         # systemd, its system state must not be failed/offline; otherwise just
         # require a live init (PID 1). Covers both worlds so one setting works
         # fleet-wide — passes if the box is up, whichever init it uses.
@@ -312,13 +548,19 @@ def build_health_check(hc):
     if t == "http":
         if not re.match(r"^https?://[^\s'\"`;$\\]+$", arg):
             return None
+        if distro == "windows":
+            ps = ("$ProgressPreference='SilentlyContinue'; try { "
+                  f"$r = Invoke-WebRequest -UseBasicParsing -Uri '{arg}' -TimeoutSec 10; "
+                  "if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 400) { exit 0 } else { exit 1 } "
+                  "} catch { exit 1 }")
+            return _win_encoded(ps)
         return ["bash", "-lc", f"curl -fsS -o /dev/null --max-time 10 -- {shlex.quote(arg)}"]
     return None
 
 
-def _rollback_verdict(snap, job, ctid, timeout):
+def _rollback_verdict(snap, job, driver, timeout):
     if snap and job.get("rollback_on_fail"):
-        return "rolled-back" if rollback(ctid, snap, timeout) else "failed-rollback"
+        return "rolled-back" if rollback(driver, snap, timeout) else "failed-rollback"
     return "failed"
 
 
@@ -356,9 +598,16 @@ def do_job(cfg, job):
                 "steps": [{"action": kind, "status": "rejected", "rc": -1,
                            "log": "ctid poza whitelistą hosta"}]}
 
+    driver = resolve_driver(ctid)
+    if driver is None:
+        return {**res, "status": "error",
+                "steps": [{"action": kind, "status": "error", "rc": -1,
+                           "log": "nieznany gość — ani `pct status`, ani `qm status` nie odpowiada"}]}
+    res["gtype"] = driver.kind
+
     # ===== ad-hoc purge: drop ALL managed snapshots (never touches manual ones) =====
     if kind == "purge":
-        deleted, err = purge_managed(ctid, job.get("prefixes") or [])
+        deleted, err = purge_managed(driver, job.get("prefixes") or [])
         res["pruned"] = deleted
         if err:
             res.update(status="error",
@@ -377,7 +626,7 @@ def do_job(cfg, job):
                        steps=[{"action": "snapshot", "status": "dryrun", "rc": 0,
                                "log": f"[DRY-RUN] utworzyłbym {name}"}])
             return res
-        snap, snaplog = snapshot(ctid, prefix)
+        snap, snaplog = snapshot(driver, prefix)
         res["snapshot"] = snap
         if snap is None:
             res.update(status="error",
@@ -385,25 +634,25 @@ def do_job(cfg, job):
                                "log": "snapshot nieudany: " + snaplog[-500:]}])
             return res
         res["steps"].append({"action": "snapshot", "status": "ok", "rc": 0, "log": snap})
-        res["pruned"] = prune_snapshots(ctid, prefix, job.get("keep", 0), job.get("max_age_days", 0))
+        res["pruned"] = prune_snapshots(driver, prefix, job.get("keep", 0), job.get("max_age_days", 0))
         res["status"] = "ok"
         return res
 
     # ===== update job =====
     actions = job.get("actions") or ([job["action"]] if job.get("action") else [])
 
-    # 0) a POWERED-OFF container: nothing can be updated inside it. Per the guest's
+    # 0) a POWERED-OFF guest: nothing can be updated inside it. Per the guest's
     # setting either leave it alone, or start it for the update — and then put it back
     # the way we found it (start_stop) or leave it running (start_keep).
     stop_after = False
-    if not _ct_running(ctid):
+    if not driver.running():
         mode = job.get("offline_mode", "skip")
         if mode not in ("start_stop", "start_keep"):
             res.update(status="skipped",
                        steps=[{"action": "power", "status": "skipped", "rc": 0,
-                               "log": "kontener wyłączony — pomijam (ustawienie: nie włączaj)"}])
+                               "log": "maszyna wyłączona — pomijam (ustawienie: nie włączaj)"}])
             return res
-        ok, plog = start_and_wait(ctid, cfg["timeout"])
+        ok, plog = start_and_wait(driver, cfg["timeout"])
         res["steps"].append({"action": "power-on", "status": ("ok" if ok else "failed"),
                              "rc": 0 if ok else -1, "log": plog})
         if not ok:
@@ -414,7 +663,7 @@ def do_job(cfg, job):
     # 1) ONE snapshot up front — the rollback point for every step below.
     snap = None
     if job.get("pre_snapshot", True):
-        snap, snaplog = snapshot(ctid, prefix)
+        snap, snaplog = snapshot(driver, prefix)
         res["snapshot"] = snap
         if snap is None:
             res.update(status="error",
@@ -423,16 +672,27 @@ def do_job(cfg, job):
             return res
 
     # 1b) retention on preupd_ (fresh one protected by keep>=1 / age 0)
-    res["pruned"] = prune_snapshots(ctid, prefix, job.get("keep", 0), job.get("max_age_days", 0))
+    res["pruned"] = prune_snapshots(driver, prefix, job.get("keep", 0), job.get("max_age_days", 0))
+
+    # 1c) QEMU-only preflight: there is no `pct exec` equivalent without a live guest
+    # agent, so fail fast with a clear reason instead of every step below timing out.
+    if driver.kind == "qemu" and not driver.agent_ready():
+        res["steps"].append({"action": "agent-check", "status": "failed", "rc": -1,
+                             "log": "brak odpowiedzi QEMU Guest Agenta — zainstaluj/uruchom agenta w "
+                                    "gościu i włącz „agent: 1” w konfiguracji VM / no response from the "
+                                    "QEMU Guest Agent — install and start it in the guest and enable "
+                                    "\u201eagent: 1\u201d on the VM"})
+        res["status"] = _rollback_verdict(snap, job, driver, cfg["timeout"])
+        return res
 
     # 2) detect the guest OS ONCE (also surfaced to the panel via the report)
-    distro = detect_distro(ctid)
+    distro = detect_distro(driver)
     res["distro"] = distro
 
-    # 2b) optional temporary RAM boost for the memory-heavy app-update build. Applied
-    # AFTER the snapshot (so a rollback reverts to the original size) and restored in
-    # the finally below no matter how the job exits.
-    boost = maybe_ram_boost(cfg, ctid, job, actions)
+    # 2b) optional temporary RAM boost for the memory-heavy app-update build (LXC only,
+    # see maybe_ram_boost). Applied AFTER the snapshot (so a rollback reverts to the
+    # original size) and restored in the finally below no matter how the job exits.
+    boost = maybe_ram_boost(cfg, driver, job, actions)
     if boost:
         res["ram_boost"] = boost
         res["steps"].append({"action": "ram-boost", "status": "ok", "rc": 0,
@@ -446,48 +706,47 @@ def do_job(cfg, job):
             if action == "security-patch":
                 cmd = build_security_patch(distro)
             elif action == "app-update":
-                cmd = build_app_update(cfg, ctid, str(job.get("app", "")), distro)
+                cmd = build_app_update(cfg, driver, str(job.get("app", "")), distro)
             else:
                 cmd = None
             if cmd is None:
                 res["steps"].append({**step, "status": "skipped", "rc": 0,
                                      "log": f"brak obsługi ({distro}) / recepty"})
                 continue
-            rc, out = run(["pct", "exec", str(ctid), "--", *cmd], cfg["timeout"])
+            rc, out = driver.exec(cmd, cfg["timeout"])
             res["steps"].append({**step, "status": ("ok" if rc == 0 else "failed"),
                                  "rc": rc, "log": out[-2000:]})
             if rc != 0:
-                res["status"] = _rollback_verdict(snap, job, ctid, cfg["timeout"])
+                res["status"] = _rollback_verdict(snap, job, driver, cfg["timeout"])
                 return res  # stop the chain; the snapshot is the safety net
 
         # 4) optional post-update reboot — the guest has to opt in, and then either the
-        # update left /var/run/reboot-required (community-scripts convention) or the
-        # guest is set to "always" (LXC rarely raises that flag — no kernel of its own).
-        # Verify the container comes back; if not, roll back to the pre-update snapshot.
+        # update left a reboot-required marker (community-scripts convention on Linux,
+        # the WU/CBS registry keys on Windows) or the guest is set to "always" (rare on
+        # LXC — no kernel of its own). Verify the guest comes back; if not, roll back.
         if job.get("auto_reboot") and overall == "ok":
             if job.get("reboot_mode") == "always":
                 rc = 0
             else:
-                rc, _ = run(["pct", "exec", str(ctid), "--",
-                             "test", "-e", "/var/run/reboot-required"], 30)
+                rc = reboot_required(driver, distro)
             if rc == 0:
-                ok, rlog = reboot_and_verify(ctid, cfg["timeout"])
+                ok, rlog = reboot_and_verify(driver, cfg["timeout"])
                 res["steps"].append({"action": "reboot", "status": ("ok" if ok else "failed"),
                                      "rc": 0 if ok else -1, "log": rlog})
                 if not ok:
-                    res["status"] = _rollback_verdict(snap, job, ctid, cfg["timeout"])
+                    res["status"] = _rollback_verdict(snap, job, driver, cfg["timeout"])
                     return res
 
         # 5) post-update health-check — verify the guest actually works. A failing
-        # probe fails the run (and rolls back) even though apt/apk returned 0.
-        hcmd = build_health_check(job.get("health_check"))
+        # probe fails the run (and rolls back) even though the update step returned 0.
+        hcmd = build_health_check(job.get("health_check"), distro)
         if hcmd:
-            rc, out = run(["pct", "exec", str(ctid), "--", *hcmd], cfg["timeout"])
+            rc, out = driver.exec(hcmd, cfg["timeout"])
             res["steps"].append({"action": "health-check",
                                  "status": ("ok" if rc == 0 else "failed"),
                                  "rc": rc, "log": out[-2000:]})
             if rc != 0:
-                overall = _rollback_verdict(snap, job, ctid, cfg["timeout"])
+                overall = _rollback_verdict(snap, job, driver, cfg["timeout"])
 
         res["status"] = overall
         return res
@@ -495,11 +754,12 @@ def do_job(cfg, job):
         if boost:
             restore_ram(ctid, boost["from"])
         # we powered it on only for this run — shut it back down however the job ended
-        # (a rollback may already have stopped it; pct stop on a stopped guest is a no-op).
+        # (a rollback may already have stopped it; stopping an already-stopped guest is
+        # a no-op either way).
         if stop_after:
-            rc, out = run(["pct", "stop", str(ctid)], cfg["timeout"]) if _ct_running(ctid) else (0, "")
+            rc, out = driver.stop(cfg["timeout"]) if driver.running() else (0, "")
             res["steps"].append({"action": "power-off", "status": ("ok" if rc == 0 else "failed"),
-                                 "rc": rc, "log": ("kontener wyłączony po aktualizacji"
+                                 "rc": rc, "log": ("maszyna wyłączona po aktualizacji"
                                                    if rc == 0 else out[-500:])})
 
 
@@ -582,7 +842,9 @@ def build_email_html(results, host):
         rb = r.get("ram_boost")
         rb_html = (f"<div style='color:#0891b2'>RAM tymczasowo {rb['from']}→{rb['to']} MB "
                    f"na czas aktualizacji / temporary RAM boost</div>") if rb else ""
-        label = "PVE host" if r.get("kind") == "host-update" else f"CT {r.get('ctid')}"
+        gtype = r.get("gtype")
+        kind_label = ("VM" if gtype == "qemu" else "CT") if gtype else "CT"
+        label = "PVE host" if r.get("kind") == "host-update" else f"{kind_label} {r.get('ctid')}"
         cards.append(
             f"<div style='border:1px solid #e2e8f0;border-radius:10px;margin:10px 0;overflow:hidden'>"
             f"<div style='background:{col};color:#fff;padding:8px 12px;font-weight:700'>"
@@ -717,7 +979,9 @@ def build_email_text(results, host):
              f"host {host} · {when} · zadań: {len(results)} · OK: {ok} · problemy: {len(bad)}",
              "-" * 56]
     for r in results:
-        label = "PVE host" if r.get("kind") == "host-update" else f"CT {r.get('ctid')}"
+        gtype = r.get("gtype")
+        kind_label = ("VM" if gtype == "qemu" else "CT") if gtype else "CT"
+        label = "PVE host" if r.get("kind") == "host-update" else f"{kind_label} {r.get('ctid')}"
         lines.append(f"{label} · {r.get('kind', 'update')} · {str(r['status']).upper()}")
         if r.get("snapshot"):
             lines.append(f"  snapshot: {r['snapshot']}")
@@ -816,13 +1080,6 @@ INVENTORY_TTL = 240    # refresh ~every tick; the slow pvesm part is cached hour
                        # (cached_coverage), so config/schedule changes surface "on the fly"
 
 
-def _sh(cmd, t=25):
-    try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=t).stdout
-    except Exception:  # noqa: BLE001
-        return ""
-
-
 def detect_backup_jobs():
     jobs, cur = [], None
     try:
@@ -911,7 +1168,7 @@ def backup_coverage(storages):
 
 def cached_coverage(storages):
     """pvesm over the network is the slow part of the scan; everything else (jobs.cfg,
-    host-maintenance, pct list) is local and re-read every tick. Cache ONLY coverage,
+    host-maintenance, pct/qm list) is local and re-read every tick. Cache ONLY coverage,
     hourly, so backup-config/schedule changes still surface 'on the fly' each tick."""
     try:
         if time.time() - os.path.getmtime(COVERAGE_CACHE) < COVERAGE_TTL:
@@ -931,7 +1188,7 @@ def cached_coverage(storages):
 
 
 # ---- host maintenance scan (read-only situational awareness) ------------------
-# Other scheduled work on the host competes for disk IO with LXC updates (ZFS
+# Other scheduled work on the host competes for disk IO with guest updates (ZFS
 # scrub/trim, mdadm check, e2scrub, fstrim, unattended apt, offsite backups, cron).
 # We only INFORM; the planner ignores these unless the user promotes one to a
 # forbidden zone in the panel.
@@ -1134,7 +1391,23 @@ def build_inventory():
         snaps = sum(1 for l in _sh(["pct", "listsnapshot", vmid], 15).splitlines()
                     if re.search(r"_\d{8}_\d{6}", l))
         b = cov.get(vmid)
-        guests[vmid] = {"name": name, "snapshots": snaps,
+        guests[vmid] = {"name": name, "snapshots": snaps, "type": "lxc",
+                        "backup": {"storage": b["storage"], "ts": b["ts"]} if b else None}
+    # QEMU VMs: same coverage/snapshot bookkeeping, plus a cheap agent-readiness ping
+    # (running guests only -- pinging a stopped VM is a guaranteed, meaningless miss)
+    # so the panel can warn "no guest agent" instead of jobs mysteriously failing later.
+    for line in _sh(["qm", "list"], 15).splitlines()[1:]:
+        c = line.split()
+        if not c:
+            continue
+        vmid = c[0]
+        name = c[1] if len(c) > 1 else ""
+        status = c[2] if len(c) > 2 else ""
+        snaps = sum(1 for l in _sh(["qm", "listsnapshot", vmid], 15).splitlines()
+                    if re.search(r"_\d{8}_\d{6}", l))
+        b = cov.get(vmid)
+        agent_ok = run(["qm", "agent", vmid, "ping"], 10)[0] == 0 if status == "running" else None
+        guests[vmid] = {"name": name, "snapshots": snaps, "type": "qemu", "agent_ok": agent_ok,
                         "backup": {"storage": b["storage"], "ts": b["ts"]} if b else None}
     return {"checked": datetime.now(timezone.utc).isoformat(),
             "jobs": [{"id": j["id"], "schedule": j.get("schedule"),
@@ -1144,7 +1417,7 @@ def build_inventory():
 
 def scan_ok(inv):
     """A scan is trustworthy only if it saw guests, and (when backup jobs exist)
-    at least one real backup. Prevents a timed-out pvesm/pct from clobbering good
+    at least one real backup. Prevents a timed-out pvesm/pct/qm from clobbering good
     data with an empty scan + a guessed window."""
     if not inv.get("guests"):
         return False
@@ -1176,17 +1449,22 @@ def maybe_refresh_inventory(cfg):
 
 def sample_results():
     return [
-        {"ctid": 108, "kind": "update", "status": "ok",
+        {"ctid": 108, "kind": "update", "gtype": "lxc", "status": "ok",
          "snapshot": "preupd_20260720_020000", "pruned": ["preupd_20260713_020000"],
          "ram_boost": {"from": 1024, "to": 4096},
          "steps": [{"action": "security-patch", "status": "ok", "rc": 0},
                    {"action": "ram-boost", "status": "ok", "rc": 0},
                    {"action": "app-update", "status": "ok", "rc": 0},
                    {"action": "health-check", "status": "ok", "rc": 0}]},
-        {"ctid": 114, "kind": "update", "status": "failed",
+        {"ctid": 114, "kind": "update", "gtype": "lxc", "status": "failed",
          "snapshot": "preupd_20260720_021500",
          "steps": [{"action": "security-patch", "status": "ok", "rc": 0},
                    {"action": "app-update", "status": "failed", "rc": 137}]},
+        {"ctid": 201, "kind": "update", "gtype": "qemu", "status": "ok",
+         "snapshot": "preupd_20260731_020000",
+         "steps": [{"action": "security-patch", "status": "ok", "rc": 0},
+                   {"action": "reboot", "status": "ok", "rc": 0},
+                   {"action": "health-check", "status": "ok", "rc": 0}]},
         {"kind": "host-update", "status": "failed", "reboot": True,
          "steps": [{"action": "host-update", "status": "failed", "rc": 100}]},
     ]
