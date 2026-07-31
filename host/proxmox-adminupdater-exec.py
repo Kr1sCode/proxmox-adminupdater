@@ -446,6 +446,11 @@ def build_app_update(cfg, driver, app, distro="debian"):
             "{ echo 'brak /usr/bin/update — nie jest to kontener community-scripts, pomijam'; exit 0; }; "
             "mkdir -p /tmp/.nc; printf '#!/bin/sh\\n:\\n' > /tmp/.nc/clear; chmod +x /tmp/.nc/clear; "
             "export PATH=/tmp/.nc:$PATH; export TERM=dumb; export PHS_SILENT=1; "
+            # `pct exec ... -- bash -lc` is NOT a real login (no login(1)/PAM), so
+            # nothing sets HOME/USER for us even with -l -- and community-scripts'
+            # own updaters (e.g. the Node.js step) assume a normal login env and
+            # crash under `set -u` with "HOME: unbound variable" without it.
+            "export HOME=${HOME:-/root} USER=${USER:-root} LOGNAME=${LOGNAME:-root}; "
             f"{to}update </dev/null >/tmp/.au-upd.log 2>&1; rc=$?; "
             "tail -c 8000 /tmp/.au-upd.log 2>/dev/null; rm -f /tmp/.au-upd.log; exit $rc"
         )
@@ -903,9 +908,19 @@ def do_job(cfg, job):
 
         # 5) post-update health-check — verify the guest actually works. A failing
         # probe fails the run (and rolls back) even though the update step returned 0.
+        # Retried a couple of times before giving up: right after reboot_and_verify
+        # confirms the guest merely ACCEPTS commands again, services like systemd/
+        # network can still be settling for a few more seconds -- a rollback is
+        # expensive and disruptive, so a transient just-booted flake shouldn't trigger
+        # one when trying again 10s later would have simply passed.
         hcmd = build_health_check(job.get("health_check"), distro)
         if hcmd:
-            rc, out = driver.exec(hcmd, cfg["timeout"])
+            rc, out = 1, ""
+            for attempt in range(3):
+                rc, out = driver.exec(hcmd, cfg["timeout"])
+                if rc == 0 or attempt == 2:
+                    break
+                time.sleep(10)
             res["steps"].append({"action": "health-check",
                                  "status": ("ok" if rc == 0 else "failed"),
                                  "rc": rc, "log": out[-2000:]})
