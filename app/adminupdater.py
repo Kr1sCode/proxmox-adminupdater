@@ -770,10 +770,10 @@ def guest_view():
     inv = state.get(INVENTORY_KEY, {})
     pve_ok = True
     try:
-        idx = core.guest_index(core.PVE(sett), lxc_only=True)
+        idx = core.guest_index(core.PVE(sett), lxc_only=False)
     except Exception:  # noqa: BLE001
         pve_ok = False
-        idx = {vid: {"type": "lxc", "node": "?", "name": g.get("name", ""), "status": "?"}
+        idx = {vid: {"type": g.get("type", "lxc"), "node": "?", "name": g.get("name", ""), "status": "?"}
                for vid, g in (inv.get("guests") or {}).items()}
     fresh_h = int(sett.get("backup_fresh_hours", 24))
     out = []
@@ -787,12 +787,14 @@ def guest_view():
         blocked = bool(g["enabled"] and sett.get("require_backup", True) and not fresh)
         distro = (st.get("last") or {}).get("distro")
         out.append({"vmid": int(vmid), "name": meta["name"], "status": meta["status"],
+                    "gtype": meta.get("type", "lxc"),
                     "os": distro.capitalize() if distro and distro != "unknown" else None,
                     "config": g,
                     "report": st.get("last"), "report_snap": st.get("last_snap"),
                     "running": running,
                     "backup": {"info": inv_g.get("backup"), "fresh": fresh},
                     "snapshots": inv_g.get("snapshots"),
+                    "agent_ok": inv_g.get("agent_ok"),
                     "blocked_no_backup": blocked})
     return {"settings": sett, "guests": out, "pve_ok": pve_ok,
             "host": state.get(HOST_KEY), "host_update": host_update_settings(cfg),
