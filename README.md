@@ -1,15 +1,15 @@
 # proxmox-adminupdater
 
-**Agentless, scheduled updates for your Proxmox LXC + VM fleet — no SSH into the guests, no agent to install in an LXC.**
+**Scheduled updates for your whole Proxmox fleet — LXC containers and QEMU VMs
+(Linux, auto-detected distro, and Windows) alike — no SSH, driven from a clean web UI.**
 
-Applies **OS security patches** and runs **per-app update recipes** inside your
-containers on a schedule, with a **pre-update snapshot** for one-click rollback —
-all driven from a clean web UI. Think of it as scheduled `apt upgrade` + the
-community-scripts "update" step, fleet-wide, without touching each guest by hand.
-
-**QEMU VMs (Linux and Windows) are supported too**, through the QEMU Guest Agent —
-same snapshot-first, health-checked, rollback-on-fail pipeline, including the
-built-in Windows Update path (no PSWindowsUpdate module needed).
+Applies **OS security patches** and runs **per-app update recipes** on a
+schedule, with a **pre-update snapshot** and **rollback on failure** for every
+guest. Think of it as scheduled `apt upgrade`/Windows Update + the
+community-scripts "update" step, fleet-wide, without logging into each guest by
+hand. LXC needs nothing extra — it rides `pct exec`. A QEMU VM needs its
+**QEMU Guest Agent** running (Proxmox's own mechanism, not an agent of ours) —
+the panel flags any VM missing one instead of silently skipping it.
 
 Sibling project to [`proxmox-autosnap`](https://github.com/Kr1sCode/proxmox-autosnap);
 it reuses the same config/schedule/UI lineage.
@@ -17,31 +17,32 @@ it reuses the same config/schedule/UI lineage.
 ## Screenshots
 
 **Service window** — the mission-control view, a full **week view** (Mon–Sun tabs,
-each with its LXC-update count). The anchors are drawn to scale from real data: every
+each with its guest-update count). The anchors are drawn to scale from real data: every
 detected **backup window** in red — its true duration learned from the PVE task
 history, so a job that runs 23:00→01:22 across midnight blocks the whole span — and
 the **PVE host update** in amber. **Other scheduled host maintenance** competing for
 disk IO (ZFS scrub/trim, mdadm check, e2scrub, fstrim, unattended apt, offsite
 backups) shows per-night as read-only rows you can one-click "avoid". Each enrolled
-LXC is laid out around them (snapshot → update → prune, time, retention). A live
+guest (LXC or VM) is laid out around them (snapshot → update → prune, time, retention). A live
 API/executor watchdog and refresh-cadence counters sit in the header. EN/PL and
 light/dark built in.
 
 ![Service window](docs/dashboard-service-window.png)
 
 **Every night, even the quiet ones** — pick any night to see exactly what touches
-the disks then. Here Sunday has no backup and no LXC updates, so it is the calmest
+the disks then. Here Sunday has no backup and no guest updates, so it is the calmest
 window; the amber column is the host update, and the grey/host-maintenance ticks are
 the only competition. Nothing is hidden just because it is empty.
 
 ![Week view — a quiet night](docs/dashboard-week-quiet.png)
 
-**LXC machines** — the fleet table: per-guest backup freshness, snapshot count,
-update scope + health-check, its scheduled **night + time**, and one-click Snapshot /
-Update / Purge / Edit. The example shows the whole fleet **spread across the week**
-(Mo–Su) with auto app-update (`app:auto`) and an auto health-check.
+**Fleet table** — LXC containers and QEMU VMs side by side: per-guest backup
+freshness, snapshot count, update scope + health-check, its scheduled **night +
+time**, and one-click Snapshot / Update / Purge / Edit. The example shows the
+whole fleet **spread across the week** (Mo–Su) with auto app-update (`app:auto`)
+and an auto health-check.
 
-![LXC machines](docs/dashboard-machines.png)
+![Fleet machines](docs/dashboard-machines.png)
 
 **Notifications** — pick when to send (every run / only failures / never), the
 grouping (one digest per service window, or one e-mail per machine) and the format
@@ -54,16 +55,18 @@ rides your Proxmox mail transport — the SMTP server and credentials stay on th
 
 ## Why the split brain (and why there IS a host component)
 
-Proxmox exposes **no REST API to run a command inside an LXC** — the guest-agent
-`exec` exists only for QEMU VMs. So with **no SSH and no in-guest agent**, the
-*only* way into a container is `pct exec` / `pct snapshot`, which are **host-side**.
+Proxmox exposes **no REST API to run a command inside an LXC**, and QEMU VMs need
+their own **QEMU Guest Agent** running before anything can be executed inside them
+either. So with **no SSH and no agent installed by us**, the *only* way into a
+guest is `pct exec`/`pct snapshot` (LXC) or `qm guest exec`/`qm snapshot` (VM),
+which are all **host-side**.
 
 adminupdater embraces that honestly and splits into two pieces:
 
 | Component | Where | Role |
 |---|---|---|
-| **Brain** | unprivileged Debian 13 **LXC** | web UI, per-guest schedule, computes the plan, stores reports. Talks to PVE read-only (`VM.Audit`). |
-| **Executor** | **PVE host** (~1 script + timer) | pulls the plan, `pct snapshot` + `pct exec` per job, posts results back. Stateless and dumb. |
+| **Brain** (a.k.a. the panel) | unprivileged Debian 13 **LXC** | web UI, per-guest schedule, computes the plan, stores reports. Talks to PVE read-only (`VM.Audit`). |
+| **Executor** | **PVE host** (~1 script + timer) | pulls the plan, drives `pct` for LXC guests or `qm`/QEMU Guest Agent for VM guests per job, posts results back. Stateless and dumb. |
 
 Unlike autosnap, this **does** leave a small footprint on the host — that is
 unavoidable for agentless in-guest execution. It is a single script + timer, so
@@ -71,17 +74,22 @@ it survives PVE upgrades.
 
 ## Security model
 
-- **Host-authoritative whitelist.** A guest is touched only if its CTID is in
-  `allowed_ctids` in `/etc/proxmox-adminupdater/host.conf` on the host. The LXC
-  can *request*, never *force*. Starts **empty** — opt-in per container.
+The **brain always runs as an LXC container itself** — below, "the panel" means
+that brain container, while "guest" means whatever it is managing (an LXC *or* a VM).
+
+- **Host-authoritative whitelist.** A guest is touched only if its VMID/CTID is
+  in `allowed_ctids` in `/etc/proxmox-adminupdater/host.conf` on the host. The
+  panel can *request*, never *force*. Starts **empty** — opt-in per guest.
 - **No raw commands cross the wire.** The plan carries only an **action enum**
-  (`security-patch` / `app-update`) + CTID + recipe *name*. The host builds the
-  actual command itself, so a compromised LXC cannot inject `rm -rf` — at worst
+  (`security-patch` / `app-update`) + guest ID + recipe *name*. The host builds the
+  actual command itself, so a compromised panel cannot inject `rm -rf` — at worst
   it asks for a patch on a guest the host already permits. Never host root.
 - **App recipes are host-trusted.** Update scripts live on the host
-  (`/etc/proxmox-adminupdater/recipes/<name>.sh`) and are `pct push`ed into the
-  guest at run time; the LXC only supplies the name.
-- **Bearer-authed plan/report**, shared secret between LXC and host.
+  (`/etc/proxmox-adminupdater/recipes/<name>.sh` or `<name>.ps1`) and are pushed
+  into the guest at run time (`pct push` for LXC; embedded straight into the
+  `qm guest exec` call for VMs, since `qm` has no file-write of its own) —
+  the panel only ever supplies the recipe *name*.
+- **Bearer-authed plan/report**, shared secret between panel and host.
 - **Pre-update snapshot** + optional **rollback on failure**.
 
 ## Install
@@ -104,38 +112,55 @@ drops the host executor + timer. Then:
 
 ## End-to-end: what one scheduled run does
 
-For a guest that is enabled, due, and allowed by the host, a single run is one
-atomic unit under one rollback point:
+Settings (panel) → schedule → the host timer fires a run. For a guest that is
+enabled, due, and allowed by the host, a single run is one atomic unit under
+**one** rollback point — the pre-update snapshot:
 
-```
-① schedule           panel (Edit modal): mode + times/weekdays or interval
-                     → stored per guest; the LXC computes "due" live via is_due
-② plan               host timer → GET /plan → ONE job per due guest:
-                       { ctid, actions:[security-patch, app-update], app, … }
-③ pre-snapshot       host: pct/qm snapshot preupd_YYYYMMDD_HHMMSS   (once)
-④ detect OS          host: os-release / guest-agent osinfo → debian|ubuntu|alpine|arch|windows|…
-⑤ disk-space guard   host: free space on the system drive vs min_free_disk_mb — too low → HELD, nothing else runs
-⑥ security patches   host: pct/qm exec …  apt-get upgrade / apk upgrade / pacman -Syu / Windows Update
-⑦ app update         host: pct push <recipe> → pct exec …  (community-scripts `update`,
-                       docker compose pull/up, … — LXC only)
-⑧ report             host → POST /report → LXC stores status + per-step log + history;
-                       last_run set → guest no longer "due" (idempotent)
+```mermaid
+flowchart TD
+    S["Panel settings\n(schedule, policies, recipes)"] --> T["Host timer\n(every few minutes)"]
+    T --> P["GET /plan\none job per due, allowed guest"]
+    P --> SNAP["Pre-update snapshot\npct/qm snapshot preupd_YYYYMMDD_HHMMSS"]
+    SNAP --> AGENT{"VM only:\nQEMU Guest Agent responding?"}
+    AGENT -- no --> FAIL1["Fail fast:\n'no guest agent' + rollback"]
+    AGENT -- yes / LXC --> OS["Detect OS\nos-release / guest-agent osinfo"]
+    OS --> DISK{"Enough free disk?\n(min_free_disk_mb)"}
+    DISK -- too low --> HELD["Status: HELD\nnothing else touched, reported as-is"]
+    DISK -- ok --> PATCH["Security patches\napt / apk / pacman / dnf / Windows Update"]
+    PATCH --> APP["App update\nrecipe .sh/.ps1 or community-scripts 'update'"]
+    APP --> RBOOT{"Reboot needed\nand auto-reboot enabled?"}
+    RBOOT -- yes --> REBOOT["Reboot + wait for guest to come back"]
+    RBOOT -- no --> HC
+    REBOOT --> HC["Health-check"]
+    HC -- ok --> OK["Report: success\n(e-mail per notification settings)"]
+    HC -- fail --> RB["Rollback to pre-update snapshot"]
+    PATCH -. rc != 0 .-> RB
+    APP -. rc != 0 .-> RB
+    REBOOT -. guest doesn't come back .-> RB
+    RB --> ERR["Report: failed + rolled back\n(e-mail with decoded rc)"]
 ```
 
-Ordering guarantees: **snapshot first**, then OS detection, then the disk-space
-guard, then patches, then the app recipe, then an optional **health-check**. If
-any step exits non-zero the chain stops; with `rollback_on_fail` the guest is
-rolled back to that one pre-snapshot (the app step never runs on a half-patched
-box). The host timer is the only clock.
+Ordering guarantees: **snapshot first**, then (VM-only) the guest-agent check,
+then OS detection, then the disk-space guard, then patches, then the app
+recipe, then an optional **reboot**, then an optional **health-check**. If any
+step exits non-zero the chain stops right there; with `rollback_on_fail` the
+guest is rolled back to that one pre-snapshot (the app step never runs on a
+half-patched box, and a rolled-back guest never sits mid-reboot). The host
+timer is the only clock — the panel itself never touches a guest directly.
 
 ## Health-check (verify, don't just trust the exit code)
 
-A per-guest probe runs **after** the updates. If it fails, the run is failed and
-rolled back — even when `apt`/`apk` returned 0. Structured (no raw commands cross
-from the LXC); the host builds the command:
+A per-guest probe runs **after** the updates (and after the reboot, if any). If
+it fails, the run is failed and rolled back — even when `apt`/`apk`/Windows
+Update returned 0. Structured (no raw commands cross from the panel); the host
+builds the command:
 
-- `systemd` + `nginx` → `systemctl is-active --quiet nginx`
-- `http` + `http://127.0.0.1/health` → `curl -fsS --max-time 10 <url>`
+- `auto` → Linux: systemd system-state if the guest runs systemd, else just
+  checks PID 1 is alive; Windows: `RpcSs` + `Winmgmt` services are running.
+- `systemd` + `nginx` → `systemctl is-active --quiet nginx` (Linux only, hidden
+  in the UI for Windows guests).
+- `http` + `http://127.0.0.1/health` → `curl` on Linux, `Invoke-WebRequest` on
+  Windows — same setting, right probe for the guest.
 
 ## Pending-updates check (no login needed)
 
@@ -201,8 +226,8 @@ the toolbar has the bulk equivalents. These ride the same pull model — the pan
 enqueues a one-shot job, the host executor picks it up on its next tick (≤ a few
 minutes) and reports back, clearing it. **Purge** deletes only managed snapshots
 (`preupd_`/`auto_`, strict `name_YYYYMMDD_HHMMSS` match) — manual snapshots are
-physically safe. The host ctid whitelist gates ad-hoc jobs exactly like scheduled
-ones: a compromised LXC can *request*, never *force*.
+physically safe. The host whitelist gates ad-hoc jobs exactly like scheduled
+ones: a compromised panel can *request*, never *force*.
 
 ## Email report (via the Proxmox host's mail)
 
@@ -228,8 +253,9 @@ container runs out of memory mid-build. The update then fails with **`rc=137`** 
 kernel OOM-killer) or **`rc=113`** (some community-scripts updaters self-abort when
 under-provisioned), even though there is nothing wrong with the app.
 
-Tick **“Temporarily raise RAM during updates”** in a container's policy (LXC machines →
-edit) and adminupdater raises **that** container's RAM to the floor you set there **only
+**LXC only** — a VM's memory isn't hot-resized by this tool, so the option is hidden
+for QEMU guests in the panel. Tick **“Temporarily raise RAM during updates”** in a
+container's policy (edit) and adminupdater raises **that** container's RAM to the floor you set there **only
 for the app-update step**, then restores the original value afterwards — whether the update succeeds,
 fails or rolls back. It only ever *raises* (a container that is already generous is left
 alone), and the **Proxmox host clamps the ceiling** with `ram_boost_max_mb` in
@@ -241,10 +267,17 @@ in `config.json`.
 
 ## App recipes
 
-Drop `<name>.sh` in `/etc/proxmox-adminupdater/recipes/` on the host and set the
-guest's app recipe to `<name>` in the panel. For community-scripts containers the
-recipe is usually just `update` (their in-guest helper). See
+Drop `<name>.sh` (Linux) and/or `<name>.ps1` (Windows) in
+`/etc/proxmox-adminupdater/recipes/` on the host and set the guest's app recipe
+to `<name>` in the panel — the executor picks the right extension for the
+guest's detected OS automatically. Works for **LXC and QEMU VMs alike**: on LXC
+the script is `pct push`ed in and run; on a VM it is embedded straight into the
+`qm guest exec` call (nothing ever touches the guest's disk as a file). See
 `host/recipes/example-app.sh`.
+
+The special value `app: auto` (community-scripts' own `/usr/bin/update` helper)
+is **LXC-only** — there is no such convention for a VM, so it's hidden in the
+panel for QEMU guests.
 
 ## Uninstall
 
