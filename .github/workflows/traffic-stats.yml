@@ -18,11 +18,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Debug token length (no value leaked)
-        env:
-          GH_TOKEN: ${{ secrets.TRAFFIC_PAT }}
-        run: echo "TRAFFIC_PAT length = ${#GH_TOKEN}"
-
       - name: Fetch and append traffic stats
         env:
           # the default GITHUB_TOKEN lacks permission for the traffic API even
