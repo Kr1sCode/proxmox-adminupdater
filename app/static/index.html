@@ -210,6 +210,8 @@
   .gname{display:flex;align-items:baseline;gap:9px}
   .gname .nm{font-weight:600}
   .gname .id{font-family:var(--mono);font-size:11px;color:var(--ink-mute)}
+  .gname .vmtag{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.03em;
+        color:var(--ink-dim);border:1px solid var(--border);border-radius:4px;padding:0 4px}
   .os{font-family:var(--mono);font-size:11px;color:var(--ink-dim)}
   .chip{font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:99px;border:1px solid var(--border);
         display:inline-flex;gap:6px;align-items:center;white-space:nowrap}
@@ -476,12 +478,12 @@
       </select>
     </div>
     <p class="note" data-i18n="rebModeNote">An LXC has no kernel of its own, so /var/run/reboot-required almost never appears — pick “always” if you want the container restarted after each update anyway. A container that fails to come back is rolled back to the pre-update snapshot.</p>
-    <div class="row" style="margin-top:.5rem"><input type="checkbox" id="dRb"><label style="margin:0" data-i18n="rbLbl">Temporarily raise RAM during updates</label></div>
+    <div id="dRbRow" class="row" style="margin-top:.5rem"><input type="checkbox" id="dRb"><label style="margin:0" data-i18n="rbLbl">Temporarily raise RAM during updates</label></div>
     <div id="dRbWrap" class="row" style="margin-top:.4rem;gap:.6rem;align-items:center">
       <label class="thin" style="margin:0" data-i18n="rbMb">Raise to at least (MB)</label>
       <input type="number" id="dRbMb" min="512" step="512" value="4096" style="max-width:140px">
     </div>
-    <p class="note" data-i18n="rbNote">Some app updates build from source (npm install, compiles) and run out of memory on a small container — the update fails with rc=137 (OOM) or rc=113 (under-provisioned). adminupdater raises this container's RAM just for the update and puts it back afterwards; the Proxmox host caps the value (ram_boost_max_mb in host.conf).</p>
+    <p id="dRbNoteP" class="note" data-i18n="rbNote">Some app updates build from source (npm install, compiles) and run out of memory on a small container — the update fails with rc=137 (OOM) or rc=113 (under-provisioned). adminupdater raises this container's RAM just for the update and puts it back afterwards; the Proxmox host caps the value (ram_boost_max_mb in host.conf).</p>
     <label style="margin-top:.7rem" data-i18n="offTitle">Container powered off at update time</label>
     <select id="dOff">
       <option value="skip" data-i18n="offSkip">Leave it off — skip the update</option>
@@ -590,6 +592,7 @@ const ICONS={
   x:'<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
   up:'<path d="M12 19.5V5M6 11l6-6 6 6"/>',
   hourglass:'<path d="M7 4h10M7 20h10M7.5 4c0 4 9 5 9 8s-9 4-9 8M16.5 4c0 4-9 5-9 8s9 4 9 8"/>',
+  windows:'<path d="M3.5 6.2L11 5.1v6.6H3.5zM12.3 5V11.7H20.5V4zM3.5 13.2H11V19.9L3.5 18.8zM12.3 13.2H20.5V20L12.3 18.9z"/>',
 };
 function ic(name,cls){return `<svg class="ic ${cls||''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]||''}</svg>`;}
 function bootIcons(root){(root||document).querySelectorAll('[data-ic]').forEach(n=>{n.innerHTML=ic(n.dataset.ic,n.dataset.icCls||'');});}
@@ -624,6 +627,7 @@ const I18N={
     kPending:'Pending',kPendingS:'scheduled soon',kProblems:'Problems',kProblemsS:'rollback / health-check',
     kCoverage:'Backup coverage',kCoverageS:'{a} / {b} have a fresh copy',kNext:'Next run',kNextS:'{n} machines',kNextNone:'no run',
     noWindows:'no backup window detected',noBackupPlan:'no backup → skipped',blockedNoBackup:'no backup → not touched',
+    noAgent:'no guest agent',noAgentHint:'QEMU Guest Agent not responding — install/start it in the VM and enable "agent: 1" on it',
     enabled:'Enabled',schedMode:'Schedule mode',calendar:'Calendar (days/time)',calendarShort:'Calendar',interval:'Interval',
     timeLbl:'Time (HH:MM)',daysLbl:'Days (0=Mon…6=Sun, empty=daily)',daysShort:'Days (empty=daily)',everyMinLbl:'Every N minutes',
     secPatch:'OS package updates (apt/apk/pacman upgrade)',
@@ -720,6 +724,7 @@ const I18N={
     kPending:'Oczekują',kPendingS:'zaplanowane wkrótce',kProblems:'Problemy',kProblemsS:'rollback / health-check',
     kCoverage:'Pokrycie backupem',kCoverageS:'{a} / {b} ma świeżą kopię',kNext:'Najbliższy run',kNextS:'{n} maszyn',kNextNone:'brak runu',
     noWindows:'nie wykryto okna backupu',noBackupPlan:'brak backupu → pominięte',blockedNoBackup:'bez backupu → nie ruszam',
+    noAgent:'brak guest agenta',noAgentHint:'QEMU Guest Agent nie odpowiada — zainstaluj/uruchom go w VM i włącz „agent: 1” w jej konfiguracji',
     enabled:'Włączony',schedMode:'Tryb harmonogramu',calendar:'Kalendarz (dni/godzina)',calendarShort:'Kalendarz',interval:'Interwał',
     timeLbl:'Godzina (HH:MM)',daysLbl:'Dni (0=Pn…6=Nd, pusto=codz.)',daysShort:'Dni (pusto=codz.)',everyMinLbl:'Co ile minut',
     secPatch:'Aktualizacje pakietów OS (apt/apk/pacman upgrade)',
@@ -842,7 +847,7 @@ const pyWeekday=d=>((d.getDay()+6)%7); // JS Sun=0 -> Py Mon=0..Sun=6
 const WD={en:['Mo','Tu','We','Th','Fr','Sa','Su'],pl:['Pn','Wt','Śr','Cz','Pt','So','Nd']};
 const wd=i=>(WD[LANG]||WD.en)[i];
 const wdList=a=>(a&&a.length)?a.map(wd).join(','):t('allDays');
-const osIcon=n=>ic('server','mut');
+const osIcon=n=>(n||'').toLowerCase()==='windows'?ic('windows','mut'):ic('server','mut');
 
 // nearest upcoming calendar run across enabled guests
 function nextRunInfo(guests){
@@ -1052,15 +1057,17 @@ function render(){
     const snapsN=g.snapshots!=null?g.snapshots:'—';
     const ret=`keep ${c.keep>0?c.keep:'∞'} · ${snapsN}`;
     const queued=(!g.running&&QMAP[g.vmid])?` <span class="qtag">${ic('hourglass')} ${t('queued')}</span>`:'';
+    const noAgent=g.gtype==='qemu'&&g.agent_ok===false;
     let last;
     if(g.running)last=`<span class="run"><span class="spin"></span> ${t('running')}</span>`;
+    else if(noAgent)last=`<span class="chip warn" title="${t('noAgentHint')}">${ic('alert')} ${t('noAgent')}</span>`;
     else if(g.blocked_no_backup)last=`<span class="chip warn">${t('blockedNoBackup')}</span>`;
     else if(r)last=`<span class="chip ${r.status==='ok'?'good':'crit'}">${r.status==='ok'?'OK':(r.status==='rollback'?'↺ rollback':r.status)}</span> <span class="muted mono">${(r.ts||'').slice(11,16)}</span>${queued}`;
     else last=`<span class="muted">—</span>${queued}`;
     const tr=document.createElement('tr');tr.dataset.vmid=g.vmid;
-    if(g.blocked_no_backup||(r&&r.status!=='ok'))tr.className='rowwarn';
+    if(noAgent||g.blocked_no_backup||(r&&r.status!=='ok'))tr.className='rowwarn';
     tr.innerHTML=`
-      <td><div class="gname"><span class="nm">${g.name||''}</span><span class="id">${g.vmid}</span></div></td>
+      <td><div class="gname"><span class="nm">${g.name||''}</span><span class="id">${g.vmid}</span>${g.gtype==='qemu'?`<span class="vmtag">VM</span>`:''}</div></td>
       <td><span class="os">${osIcon(g.os)} ${g.os||('<span class="muted">'+g.status+'</span>')}</span></td>
       <td>${backupChip(g)}</td>
       <td><span class="snaps">${ret}</span></td>
@@ -1218,8 +1225,22 @@ el('mApply').onclick=async()=>{if(!PLAN||!PLAN.plan.length)return;const n=await 
   alert(`${t('appliedN')} ${n}`);el('sdlg').close();load();};
 
 // ---------- edit guest ----------
+function applyGtypeGates(g){
+  // "auto" app-update is the community-scripts /usr/bin/update helper (LXC-only), RAM
+  // boost is an LXC memory-limit trick (no QEMU equivalent yet), and "systemd is-active"
+  // has no meaning on a VM that turns out to be Windows — hide what can't do anything.
+  const isLxc=g.gtype!=='qemu';
+  const isWin=(g.os||'').toLowerCase()==='windows';
+  const autoOpt=el('dAppMode').querySelector('option[value="auto"]');
+  if(autoOpt)autoOpt.style.display=isLxc?'':'none';
+  const sdOpt=el('dHcType').querySelector('option[value="systemd"]');
+  if(sdOpt)sdOpt.style.display=(isLxc&&!isWin)?'':'none';
+  for(const id of['dRbRow','dRbWrap','dRbNoteP'])el(id).style.display=isLxc?'':'none';
+}
 function edit(g){
-  const c=g.config;el('dTitle').textContent=`CT ${g.vmid} — ${g.name||''}`;
+  const c=g.config;const kind=g.gtype==='qemu'?'VM':'CT';
+  el('dTitle').textContent=`${kind} ${g.vmid} — ${g.name||''}`;
+  applyGtypeGates(g);
   el('dEnabled').checked=c.enabled;el('dMode').value=c.mode;
   el('dTime').value=(c.times||['03:30'])[0];el('dDays').value=(c.weekdays||[]).join(',');
   el('dInterval').value=c.interval_minutes;el('dSec').checked=c.security_patch;
