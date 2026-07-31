@@ -172,6 +172,17 @@ def compute_plan():
                 "dryrun": bool(s["dryrun"]),
             })
 
+    # --- AUTO-CHECK: once a day, a read-only pending-updates probe for every
+    # KNOWN guest (from inventory, not just ones with an update schedule) --
+    # this is what feeds the dashboard's "pending updates" count and the
+    # scheduler's duration estimate, without anyone clicking the button.
+    # Independent of enabled/backup-freshness: it changes nothing on the guest.
+    for vmid in (inv.get("guests") or {}):
+        st = state.get(str(vmid), {})
+        last_ts = (st.get("last_check") or {}).get("ts")
+        if now - _iso_epoch(last_ts) >= AUTO_CHECK_INTERVAL_S:
+            jobs.append({"kind": "check", "ctid": int(vmid)})
+
     # --- HOST UPDATE job: update the PVE host itself (own clock in _host).
     hu = host_update_settings(cfg)
     if hu["enabled"]:
@@ -179,6 +190,20 @@ def compute_plan():
         if core.is_due(hu, last_host, now):
             jobs.append({"kind": "host-update"})
     return jobs
+
+
+AUTO_CHECK_INTERVAL_S = 24 * 3600
+
+
+def _iso_epoch(ts):
+    """Parse a report's ISO timestamp to epoch seconds; 0 (== 'never') on
+    anything missing or unparsable, so a bad/absent value just means 'due now'."""
+    if not ts:
+        return 0
+    try:
+        return dt.datetime.fromisoformat(str(ts)).timestamp()
+    except ValueError:
+        return 0
 
 
 def record_report(results):
@@ -194,6 +219,12 @@ def record_report(results):
                "ts": r.get("ts"), "steps": r.get("steps", []),
                "pruned": r.get("pruned", []), "reboot": r.get("reboot", False),
                "ram_boost": r.get("ram_boost")}
+        if kind == "check":
+            rec["pending"] = r.get("pending", [])
+            rec["distro"] = r.get("distro")
+        if r.get("status") == "low-disk":
+            rec["disk_free_mb"] = r.get("disk_free_mb")
+            rec["disk_min_mb"] = r.get("disk_min_mb")
         if kind == "host-update":
             hs = state.get(HOST_KEY, {})
             hs["last_run"] = now
@@ -208,6 +239,8 @@ def record_report(results):
             entry["last_snap"] = rec
         elif kind == "purge":
             entry["last_purge"] = rec   # ad-hoc: touches no schedule clock
+        elif kind == "check":
+            entry["last_check"] = rec   # ad-hoc: informational only, no schedule clock
         else:
             entry["last_run"] = now
             entry["last"] = rec
@@ -371,6 +404,8 @@ def enqueue_actions(action, vmids):
         elif action == "purge":
             prefixes = sorted({sett["snapshot_prefix"], g["snapshot"]["prefix"]})
             jobs.append({"kind": "purge", "ctid": int(vmid), "prefixes": prefixes})
+        elif action == "check":
+            jobs.append({"kind": "check", "ctid": int(vmid)})
         elif action == "update":
             job = build_update_job(g, vmid, sett)
             if job:
@@ -563,12 +598,52 @@ def time_in_backup_window(cfg, hhmm, inv=None, weekdays=None):
     return None
 
 
-def _place_one(lanes, ws, we_lin, conc, spacing, zones):
+_KERNEL_RX = re.compile(r"^(linux-image|linux-headers|linux-modules|linux-generic|kernel)[-\s]", re.I)
+_WIN_CUMULATIVE_RX = re.compile(r"cumulative update|feature update|version \d{2}h\d", re.I)
+_WIN_CLEAN_RX = re.compile(r"^OK:")
+
+# Duration buckets (minutes) -- deliberately coarse. Real durations vary with disk
+# speed/network/package size; this only needs to be in the right ballpark so a heavy
+# guest doesn't get squeezed into the same slot width as a one-package guest.
+DUR_CLEAN = 3        # nothing pending: just the no-op run + health-check
+DUR_LIGHT = 8         # a handful of small packages / Defender-only on Windows
+DUR_MEDIUM = 18       # a normal package batch
+DUR_KERNEL = 25       # kernel package -> initramfs rebuild, usually wants a reboot
+DUR_WIN_CUMULATIVE = 45   # Windows cumulative/feature update: download+install+reboot
+
+
+def estimate_duration_min(vmid, state, fallback):
+    """Rough expected runtime for this guest's NEXT update, minutes. Reads the cached
+    result of the read-only 'check' probe (report_check / state[vmid]['last_check']) --
+    no live probing here, this only ever looks at data already on disk. Unknown/never
+    checked -> `fallback` (the configured spacing), so an unchecked guest keeps today's
+    behaviour instead of silently getting squeezed."""
+    rec = (state.get(str(vmid), {}) or {}).get("last_check")
+    if not rec or rec.get("status") != "ok":
+        return fallback
+    pending = rec.get("pending") or []
+    if not pending or (len(pending) == 1 and _WIN_CLEAN_RX.match(pending[0])):
+        return DUR_CLEAN
+    if rec.get("distro") == "windows":
+        if any(_WIN_CUMULATIVE_RX.search(p) for p in pending):
+            return DUR_WIN_CUMULATIVE
+        return DUR_LIGHT
+    if any(_KERNEL_RX.match(p) for p in pending):
+        return DUR_KERNEL
+    return DUR_LIGHT if len(pending) <= 3 else DUR_MEDIUM
+
+
+def _place_one(lanes, ws, we_lin, conc, spacing, zones, duration=None):
     """Place ONE item into the earliest free lane of a night; return its LINEAR minute
     (>= 1440 when it lands after midnight) or None if the night is full. Works in a
     linear timeline [ws, we_lin) so a window that crosses midnight (e.g. 23:30->05:00,
     we_lin = 05:00 + 1440) is handled; zone tests use the wall-clock minute (cur % 1440).
-    Mutates lanes."""
+    `duration` (minutes, estimated real runtime) widens this item's own reserved slot
+    when it's longer than the configured `spacing` -- a heavy Windows cumulative update
+    pushes the NEXT guest further out instead of it being scheduled to start while the
+    heavy one is still very likely mid-run (jobs execute strictly sequentially, one
+    executor process, see proxmox-adminupdater.service). Mutates lanes."""
+    slot_len = max(spacing, int(duration)) if duration else spacing
     for _ in range(conc):
         li = min(range(conc), key=lambda i: lanes[i])   # earliest-free lane
         cur = lanes[li]
@@ -581,14 +656,16 @@ def _place_one(lanes, ws, we_lin, conc, spacing, zones):
             cur += adv or 1
             guard += 1
         if cur < we_lin and not _in_zone(cur % 1440, zones):
-            lanes[li] = cur + spacing
+            lanes[li] = cur + slot_len
             return cur
         lanes[li] = we_lin                               # this lane is full
     return None
 
 
 def _night_capacity(ws, we_lin, conc, spacing, zones):
-    """How many placements fit in one night (used for ranking + the capacity meter)."""
+    """How many placements fit in one night at the DEFAULT spacing (used only for
+    ranking nights by free capacity + the capacity meter -- a generic proxy, not a
+    per-guest prediction, so it deliberately ignores duration estimates)."""
     lanes, n = [ws] * conc, 0
     while n < 1000:
         if _place_one(lanes, ws, we_lin, conc, spacing, zones) is None:
@@ -615,6 +692,8 @@ def propose_schedule(cfg, vmids=None):
         fh = int(cfg["settings"].get("backup_fresh_hours", 24))
         vmids = sorted((v for v in names if guest_backup_fresh(v, inv, fh, now)), key=int)
     vmids = [str(v) for v in vmids]
+    state = core.load_state()
+    durations = {v: estimate_duration_min(v, state, spacing) for v in vmids}
 
     # a window whose end is <= start crosses midnight -> extend it past 24:00 so the
     # night is one continuous span (23:30->05:00 becomes [1410, 1740)).
@@ -638,7 +717,8 @@ def propose_schedule(cfg, vmids=None):
         placed = False
         for k in range(len(order)):
             night = nights[order[(di + k) % len(order)]]
-            slot = _place_one(night["lanes"], ws, we_lin, conc, spacing, night["zones"])
+            slot = _place_one(night["lanes"], ws, we_lin, conc, spacing, night["zones"],
+                               duration=durations.get(v))
             if slot is not None:
                 night["placed"].append(v)
                 # a slot past midnight belongs to the NEXT calendar day
@@ -652,12 +732,13 @@ def propose_schedule(cfg, vmids=None):
             unplaceable.append(int(v))
 
     plan = [{"vmid": int(v), "name": names.get(v, {}).get("name", ""),
-             "weekday": assign[v][0], "time": fmt(assign[v][1])}
+             "weekday": assign[v][0], "time": fmt(assign[v][1]), "duration_min": durations.get(v, spacing)}
             for v in sorted(assign, key=lambda x: (assign[x][0], assign[x][1]))]
     per_day = [{"weekday": nt["weekday"], "cap": nt["cap"],
                 "forbidden": [{"start": fmt(s), "end": fmt(e)} for s, e in nt["zones"]],
                 "items": [{"vmid": int(v), "name": names.get(v, {}).get("name", ""),
-                           "time": fmt(assign[v][1])} for v in nt["placed"]]}
+                           "time": fmt(assign[v][1]), "duration_min": durations.get(v, spacing)}
+                          for v in nt["placed"]]}
                for nt in nights]
     total = sum(nt["cap"] for nt in nights)
     return {
@@ -791,6 +872,7 @@ def guest_view():
                     "os": distro.capitalize() if distro and distro != "unknown" else None,
                     "config": g,
                     "report": st.get("last"), "report_snap": st.get("last_snap"),
+                    "report_check": st.get("last_check"),
                     "running": running,
                     "backup": {"info": inv_g.get("backup"), "fresh": fresh},
                     "snapshots": inv_g.get("snapshots"),

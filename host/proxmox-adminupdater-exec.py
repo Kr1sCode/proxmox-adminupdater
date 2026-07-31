@@ -63,6 +63,11 @@ def load_cfg():
         # the HOST caps it here — a compromised LXC can never set an absurd limit on a
         # whitelisted guest (defence in depth, same spirit as host_update).
         "ram_boost_max_mb": g.getint("ram_boost_max_mb", 8192),
+        # Minimum free space (MB) required on the guest's system drive right
+        # before an update runs -- a blunt but robust guard (no per-package
+        # size prediction, which is fragile/locale-dependent across package
+        # managers) against a full disk wedging the guest mid-install.
+        "min_free_disk_mb": g.getint("min_free_disk_mb", 1024),
     }
 
 
@@ -288,6 +293,74 @@ WIN_HEALTH_AUTO_PS = (
     "$s = Get-Service RpcSs, Winmgmt -ErrorAction SilentlyContinue; "
     "if (-not $s -or ($s | Where-Object Status -ne 'Running')) { exit 1 } else { exit 0 }"
 )
+
+# ---- read-only update check: list what's pending, install nothing ------------
+WIN_CHECK_PS = r"""
+$ProgressPreference = 'SilentlyContinue'
+try {
+    $session = New-Object -ComObject Microsoft.Update.Session
+    $searcher = $session.CreateUpdateSearcher()
+    $result = $searcher.Search("IsInstalled=0 and IsHidden=0")
+    if ($result.Updates.Count -eq 0) { Write-Output "OK: brak zaleglych aktualizacji" }
+    else { foreach ($u in $result.Updates) { Write-Output $u.Title } }
+} catch {
+    Write-Output ("BLAD: " + $_.Exception.Message)
+}
+exit 0
+"""
+
+
+def build_check_updates(d):
+    """Read-only probe: what's available but NOT installed. Never downloads or
+    installs anything -- safe to run on demand from the panel without touching
+    the guest. Each branch normalizes to exit 0 (the text itself carries the
+    result, including a distinguishable 'OK:' line when nothing is pending)."""
+    if d in ("debian", "ubuntu"):
+        return ["bash", "-lc",
+                "apt-get update -qq >/dev/null 2>&1; "
+                "n=$(apt list --upgradable 2>/dev/null | tail -n +2); "
+                "if [ -z \"$n\" ]; then echo 'OK: brak zaleglych aktualizacji'; else echo \"$n\"; fi"]
+    if d == "alpine":
+        return ["ash", "-lc",
+                "apk update -q >/dev/null 2>&1; n=$(apk list -u 2>/dev/null); "
+                "if [ -z \"$n\" ]; then echo 'OK: brak zaleglych aktualizacji'; else echo \"$n\"; fi"]
+    if d in ("arch", "archarm"):
+        return ["bash", "-lc",
+                "pacman -Sy --noconfirm -q >/dev/null 2>&1; n=$(pacman -Qu 2>/dev/null); "
+                "if [ -z \"$n\" ]; then echo 'OK: brak zaleglych aktualizacji'; else echo \"$n\"; fi"]
+    if d in ("fedora", "rhel", "centos", "rocky", "almalinux"):
+        return ["bash", "-lc",
+                "n=$( (dnf check-update -q 2>/dev/null || yum check-update -q 2>/dev/null) "
+                "| grep -v '^$' | grep -vi '^Last metadata'); "
+                "if [ -z \"$n\" ]; then echo 'OK: brak zaleglych aktualizacji'; else echo \"$n\"; fi"]
+    if d == "windows":
+        return _win_encoded(WIN_CHECK_PS)
+    return None
+
+
+def check_free_disk_mb(driver, distro):
+    """Free space (MB) on the guest's system drive. Deliberately a blunt
+    free-space floor rather than a per-package size prediction -- parsing
+    apt/dnf/pacman "will use N MB" output is locale-dependent and fragile
+    across package managers; a plain threshold is robust everywhere and is
+    what actually prevents a full disk from wedging the guest mid-install.
+    Returns (free_mb:int|None, error:str|None) -- exactly one is not-None."""
+    if distro == "windows":
+        cmd = _win_encoded(
+            "$ProgressPreference='SilentlyContinue'; "
+            "$d = (Get-CimInstance Win32_LogicalDisk -Filter \"DeviceID='C:'\").FreeSpace; "
+            "if ($null -eq $d) { exit 1 }; Write-Output ([math]::Floor($d/1MB))"
+        )
+    else:
+        # df -P (POSIX format, avoids long-device-name line wrapping), -k (1K
+        # blocks); column 4 is "Available" on the data row. Works unmodified on
+        # any coreutils/busybox df, so no per-distro branching needed here.
+        cmd = ["sh", "-c", "df -Pk / | awk 'NR==2{print int($4/1024)}'"]
+    rc, out = driver.exec(cmd, 30)
+    lines = [ln.strip() for ln in out.strip().splitlines() if ln.strip()]
+    if rc != 0 or not lines or not lines[-1].isdigit():
+        return None, f"nie udało się odczytać wolnego miejsca (rc={rc}): {out[-200:]}"
+    return int(lines[-1]), None
 
 
 def detect_distro(driver):
@@ -618,6 +691,35 @@ def do_job(cfg, job):
         res["status"] = "ok"
         return res
 
+    # ===== ad-hoc check: read-only list of pending updates, installs nothing,
+    # touches no snapshot -- safe to run anytime, including on the sole DC. =====
+    if kind == "check":
+        if not driver.running():
+            res.update(status="skipped",
+                       steps=[{"action": "check", "status": "skipped", "rc": 0,
+                               "log": "maszyna wyłączona — pomijam"}])
+            return res
+        if driver.kind == "qemu" and not driver.agent_ready():
+            res.update(status="error",
+                       steps=[{"action": "check", "status": "error", "rc": -1,
+                               "log": "brak odpowiedzi QEMU Guest Agenta"}])
+            return res
+        distro = detect_distro(driver)
+        res["distro"] = distro
+        cmd = build_check_updates(distro)
+        if cmd is None:
+            res.update(status="skipped",
+                       steps=[{"action": "check", "status": "skipped", "rc": 0,
+                               "log": f"brak obsługi dla systemu ({distro})"}])
+            return res
+        rc, out = driver.exec(cmd, cfg["timeout"])
+        text = out.strip()
+        res["pending"] = [ln for ln in text.splitlines() if ln.strip()] if text else []
+        res["steps"].append({"action": "check", "status": ("ok" if rc == 0 else "failed"),
+                             "rc": rc, "log": text[-4000:]})
+        res["status"] = "ok" if rc == 0 else "error"
+        return res
+
     # ===== independent scheduled snapshot job (autosnap-style) =====
     if kind == "snapshot":
         if job.get("dryrun"):
@@ -688,6 +790,30 @@ def do_job(cfg, job):
     # 2) detect the guest OS ONCE (also surfaced to the panel via the report)
     distro = detect_distro(driver)
     res["distro"] = distro
+
+    # 2a) disk-space preflight -- refuse to start an install that could wedge the
+    # guest mid-way through (full disk during apt/dnf/Windows Update is a classic
+    # way to leave a guest half-patched and broken). A probe failure does NOT
+    # block the update (fail-open: an unrelated df/CIM hiccup shouldn't hold a
+    # guest back from real patches -- the pre-update snapshot is still the safety
+    # net for a genuine mid-update failure).
+    min_free = int(cfg.get("min_free_disk_mb", 1024))
+    free_mb, disk_err = check_free_disk_mb(driver, distro)
+    if disk_err:
+        res["steps"].append({"action": "disk-space", "status": "skipped", "rc": 0,
+                             "log": f"sonda miejsca nieudana, kontynuuję mimo to: {disk_err}"})
+    elif free_mb < min_free:
+        res["steps"].append({"action": "disk-space", "status": "failed", "rc": -1,
+                             "log": f"za mało wolnego miejsca: {free_mb} MB < wymagane {min_free} MB — "
+                                    f"aktualizacja WSTRZYMANA (low free disk space: {free_mb} MB < "
+                                    f"required {min_free} MB — update HELD)"})
+        res["status"] = "low-disk"
+        res["disk_free_mb"] = free_mb
+        res["disk_min_mb"] = min_free
+        return res
+    else:
+        res["steps"].append({"action": "disk-space", "status": "ok", "rc": 0,
+                             "log": f"wolne miejsce: {free_mb} MB (próg {min_free} MB)"})
 
     # 2b) optional temporary RAM boost for the memory-heavy app-update build (LXC only,
     # see maybe_ram_boost). Applied AFTER the snapshot (so a rollback reverts to the
@@ -767,7 +893,8 @@ GOOD = ("ok", "skipped", "dryrun")
 
 
 def _color(s):
-    return {"ok": "#16a34a", "dryrun": "#0891b2", "skipped": "#64748b"}.get(s, "#dc2626")
+    return {"ok": "#16a34a", "dryrun": "#0891b2", "skipped": "#64748b",
+            "low-disk": "#d97706"}.get(s, "#dc2626")
 
 
 def rc_hint(rc):
@@ -1484,7 +1611,9 @@ def main():
         results.append(r)
     if results:
         http(cfg, "/report", "POST", {"results": results})
-        maybe_notify(cfg, results)
+        # ad-hoc "check" probes are informational glances from the panel, not
+        # something worth an email digest entry
+        maybe_notify(cfg, [r for r in results if r.get("kind") != "check"])
     if plan.get("notify_test"):    # "Send test" from the panel
         tcfg = dict(cfg); tcfg["notify_on"] = "always"; tcfg["notify_grouping"] = "digest"
         print("wysyłam e-mail testowy (żądanie z panelu)")

@@ -1,11 +1,15 @@
 # proxmox-adminupdater
 
-**Agentless, scheduled updates for your Proxmox LXC fleet — no SSH into the guests, no agent inside them.**
+**Agentless, scheduled updates for your Proxmox LXC + VM fleet — no SSH into the guests, no agent to install in an LXC.**
 
 Applies **OS security patches** and runs **per-app update recipes** inside your
 containers on a schedule, with a **pre-update snapshot** for one-click rollback —
 all driven from a clean web UI. Think of it as scheduled `apt upgrade` + the
 community-scripts "update" step, fleet-wide, without touching each guest by hand.
+
+**QEMU VMs (Linux and Windows) are supported too**, through the QEMU Guest Agent —
+same snapshot-first, health-checked, rollback-on-fail pipeline, including the
+built-in Windows Update path (no PSWindowsUpdate module needed).
 
 Sibling project to [`proxmox-autosnap`](https://github.com/Kr1sCode/proxmox-autosnap);
 it reuses the same config/schedule/UI lineage.
@@ -108,19 +112,21 @@ atomic unit under one rollback point:
                      → stored per guest; the LXC computes "due" live via is_due
 ② plan               host timer → GET /plan → ONE job per due guest:
                        { ctid, actions:[security-patch, app-update], app, … }
-③ pre-snapshot       host: pct snapshot preupd_YYYYMMDD_HHMMSS   (once)
-④ detect OS          host: pct exec … cat /etc/os-release → debian|ubuntu|alpine|arch
-⑤ security patches   host: pct exec …  apt-get upgrade / apk upgrade / pacman -Syu
-⑥ app update         host: pct push <recipe> → pct exec …  (community-scripts `update`,
-                       docker compose pull/up, …)
-⑦ report             host → POST /report → LXC stores status + per-step log + history;
+③ pre-snapshot       host: pct/qm snapshot preupd_YYYYMMDD_HHMMSS   (once)
+④ detect OS          host: os-release / guest-agent osinfo → debian|ubuntu|alpine|arch|windows|…
+⑤ disk-space guard   host: free space on the system drive vs min_free_disk_mb — too low → HELD, nothing else runs
+⑥ security patches   host: pct/qm exec …  apt-get upgrade / apk upgrade / pacman -Syu / Windows Update
+⑦ app update         host: pct push <recipe> → pct exec …  (community-scripts `update`,
+                       docker compose pull/up, … — LXC only)
+⑧ report             host → POST /report → LXC stores status + per-step log + history;
                        last_run set → guest no longer "due" (idempotent)
 ```
 
-Ordering guarantees: **snapshot first**, then OS detection, then patches, then the
-app recipe, then an optional **health-check**. If any step exits non-zero the chain
-stops; with `rollback_on_fail` the guest is rolled back to that one pre-snapshot
-(the app step never runs on a half-patched box). The host timer is the only clock.
+Ordering guarantees: **snapshot first**, then OS detection, then the disk-space
+guard, then patches, then the app recipe, then an optional **health-check**. If
+any step exits non-zero the chain stops; with `rollback_on_fail` the guest is
+rolled back to that one pre-snapshot (the app step never runs on a half-patched
+box). The host timer is the only clock.
 
 ## Health-check (verify, don't just trust the exit code)
 
@@ -130,6 +136,33 @@ from the LXC); the host builds the command:
 
 - `systemd` + `nginx` → `systemctl is-active --quiet nginx`
 - `http` + `http://127.0.0.1/health` → `curl -fsS --max-time 10 <url>`
+
+## Pending-updates check (no login needed)
+
+Every row has a **check** button (the list icon) that asks the guest what's
+outstanding — Windows queries Windows Update (search only, nothing downloaded
+or installed); Linux runs `apt list --upgradable` / `apk list -u` / `pacman -Qu`
+/ `dnf check-update`. The result (a plain list, or "nothing pending") shows in a
+dialog, cached with a timestamp, so you can see at a glance whether a machine —
+including a domain controller or anything else you'd rather not touch by hand —
+actually has updates waiting, without opening a session on it.
+
+This also runs **once a day automatically** for every known guest, feeding the
+dashboard's **"Updates found"** tile and the schedule planner's duration
+estimate below — no clicking required for it to stay useful.
+
+## Disk-space guard
+
+Right before an update actually runs, the executor checks free space on the
+guest's system drive (`df` on Linux, `Win32_LogicalDisk` on Windows) against a
+configurable floor (`min_free_disk_mb` in `host.conf`, default 1024 MB). Below
+it, the update is **held** — nothing is touched — instead of risking a package
+manager or Windows Update running out of room mid-install and leaving the
+guest half-patched. It shows as a distinct **"low disk"** status: a dashboard
+banner listing every affected machine with its free/required numbers, a chip on
+the guest's row, and the usual e-mail report. A failed *probe* (not low space,
+just a read error) never blocks the update — the pre-update snapshot is still
+the real safety net for that.
 
 ## Scheduled snapshots (autosnap built in)
 
@@ -150,6 +183,16 @@ Preview the placement, then **Apply** to write it back to the guests.
 
 The same knowledge guards manual edits: saving a calendar time that lands inside
 a detected backup window is refused with a clear prompt (you can still force it).
+
+**Slot width follows the real workload, not a flat guess.** Each guest's last
+pending-updates check (above) feeds a rough duration estimate — a Windows
+cumulative/feature update reserves far more time than a Defender-only guest, a
+Linux kernel package reserves more than a couple of small libraries — so a heavy
+guest actually pushes the next one further out instead of assuming everyone
+takes the same 20 minutes (jobs run strictly sequentially on the host, one
+executor process, so an under-sized gap here is a real collision, not just a
+cosmetic one). A guest that's never been checked keeps the configured default
+spacing.
 
 ## Ad-hoc actions (do it now)
 

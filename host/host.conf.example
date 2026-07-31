@@ -30,6 +30,14 @@ tls_insecure   = false
 # actually spare across concurrent updates.
 ram_boost_max_mb = 8192
 
+# Minimum free space (MB) required on a guest's system drive right before an
+# update runs. Below this, the update is held (status "low-disk" in the panel
+# + a dashboard alert + the usual e-mail report) instead of risking a full
+# disk mid-install. A blunt floor rather than a per-package size prediction --
+# parsing apt/dnf/pacman "will use N MB" output is locale-dependent and
+# fragile across package managers, a plain threshold is robust everywhere.
+min_free_disk_mb = 1024
+
 # E-mail report (HTML) after each run.
 # notify_via: pve      -> reuse Proxmox's configured SMTP notification target
 #                        (reads /etc/pve/notifications.cfg + the password in

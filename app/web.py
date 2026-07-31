@@ -265,7 +265,7 @@ def api_maintenance():
     return jsonify({"ok": True, "maintenance": m})
 
 
-_ACTIONS = ("snapshot", "purge", "update")
+_ACTIONS = ("snapshot", "purge", "update", "check")
 
 
 @app.route("/api/actions", methods=["POST"])

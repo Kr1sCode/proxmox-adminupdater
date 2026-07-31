@@ -108,7 +108,7 @@
   .host .push{margin-left:auto;display:flex;gap:12px;align-items:center}
 
   /* KPI tiles */
-  .kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin:6px 0 20px}
+  .kpis{display:grid;grid-template-columns:repeat(7,1fr);gap:12px;margin:6px 0 20px}
   .tile{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--r);padding:14px 15px;
         display:flex;flex-direction:column;gap:6px;min-height:96px;position:relative;overflow:hidden}
   .tile .k{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mute)}
@@ -294,8 +294,18 @@
   .covlist{border:1px solid var(--border-soft);border-radius:var(--r-sm)}
   .covlist div.r{display:flex;justify-content:space-between;padding:8px 12px;border-bottom:1px solid var(--border-soft);font-size:13px}
   .covlist div.r:last-child{border-bottom:0}
+  .checklist{list-style:none;margin:0;padding:0;border:1px solid var(--border-soft);border-radius:var(--r-sm);max-height:50vh;overflow:auto}
+  .checklist li{padding:7px 12px;border-bottom:1px solid var(--border-soft);font-size:13px;font-family:var(--mono)}
+  .checklist li:last-child{border-bottom:0}
+  .checklog{white-space:pre-wrap;font-family:var(--mono);font-size:12px;background:var(--surface-2);border-radius:var(--r-sm);padding:10px;max-height:40vh;overflow:auto}
 
   .foot{margin:26px 0 0;padding-top:14px;border-top:1px solid var(--border-soft);font-size:12px;color:var(--ink-mute)}
+  .diskalert{border:1px solid var(--crit);background:var(--crit-bg);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:16px}
+  .diskalert .dh{display:flex;align-items:center;gap:8px;font-weight:700;color:var(--crit)}
+  .diskalert ul{list-style:none;margin:8px 0 0;padding:0}
+  .diskalert li{display:flex;justify-content:space-between;padding:4px 0;font-size:13px;border-top:1px solid var(--border-soft)}
+  .diskalert li:first-child{border-top:0}
+  @media(max-width:1200px){.kpis{grid-template-columns:repeat(4,1fr)}}
   @media(max-width:900px){.kpis{grid-template-columns:repeat(2,1fr)}.scan{grid-template-columns:1fr 1fr}.host .push{margin-left:0}}
 </style>
 </head>
@@ -350,6 +360,7 @@
   </div>
 </section>
 <div class="wrap">
+  <div id="diskAlert"></div>
   <section class="pane active" id="pane-window">
     <div class="host unknown" id="hostbar" style="display:none">
       <span class="dot"></span><b data-i18n="pveHost">PVE host</b>
@@ -566,6 +577,18 @@
   <div class="dlg-foot"><span></span><button class="btn ghost" onclick="sdlg.close()" data-i18n="close">Close</button></div>
 </dialog>
 
+<!-- pending-updates check (read-only) -->
+<dialog id="cdlg">
+  <div class="dlg-head"><h3 id="cTitle" data-i18n="checkTitle">Pending updates</h3></div>
+  <div class="dlg-body" id="cBody"></div>
+  <div class="dlg-foot"><span class="muted" id="cMeta"></span>
+    <div style="display:flex;gap:10px">
+      <button class="btn ghost" onclick="cdlg.close()" data-i18n="close">Close</button>
+      <button class="btn primary" id="cRefresh" data-i18n="checkAgain">Check now</button>
+    </div>
+  </div>
+</dialog>
+
 <script>
 const el=id=>document.getElementById(id);
 
@@ -609,7 +632,7 @@ const I18N={
     cadUiTip:'Dashboard auto-refresh — every 5 s (60 s while the wizard is open)',
     containers:'Containers',log:'Log',logout:'Log out',pause:'Pause',resume:'Resume',pauseTag:'PAUSED',linesLbl:'lines',
     logFilterPh:'filter text…',logCatAll:'All events',logCatAudit:'Audit (changes)',logCatTask:'Tasks',logCatError:'Errors / rollback',logCsv:'Export CSV',
-    wizard:'Wizard',themeWord:'Theme',change:'Change',
+    wizard:'Settings',themeWord:'Theme',change:'Change',
     thName:'Machine',thSystem:'System',thBackup:'Backup',thSnaps:'Snapshots',thSchedule:'Schedule',thScope:'Scope + health',thLast:'Last',
     edit:'Edit',disabled:'disabled',allDays:'daily',paused:'paused',
     refresh:'Refresh',autoLbl:'auto (5 s)',logMeta:'last 200 lines',empty:'(empty)',
@@ -625,6 +648,9 @@ const I18N={
     wizHostNote:'adminupdater runs this itself on the host (apt upgrade from host.conf → host_update_cmd, needs host_update=on) — it is not a third-party script. It shows as the amber row in the service window below; on a shared night the planner keeps LXC updates clear of it.',
     kManaged:'Managed',kManagedS:'of {n} machines on host',kCurrent:'Up to date',kCurrentS:'after last run',
     kPending:'Pending',kPendingS:'scheduled soon',kProblems:'Problems',kProblemsS:'rollback / health-check',
+    kUpdatesFound:'Updates found',kUpdatesFoundS:'checked {a} / {b} machines',
+    lowDiskChip:'⚠ low disk',diskAlertTitle:'{n} machine(s) blocked — not enough free disk space for the update',
+    diskAlertLine:'{f} MB free (needs ≥ {m} MB)',
     kCoverage:'Backup coverage',kCoverageS:'{a} / {b} have a fresh copy',kNext:'Next run',kNextS:'{n} machines',kNextNone:'no run',
     noWindows:'no backup window detected',noBackupPlan:'no backup → skipped',blockedNoBackup:'no backup → not touched',
     noAgent:'no guest agent',noAgentHint:'QEMU Guest Agent not responding — install/start it in the VM and enable "agent: 1" on it',
@@ -653,6 +679,10 @@ const I18N={
     hostNote:'The command is defined host-side (host.conf → host_update_cmd) and needs host_update=on there.',
     proposeBtn:'Plan schedule',bulkSnap:'Snapshot all',bulkUpd:'Update all',bulkPurge:'Purge all',
     snapNow:'Snapshot now',updNow:'Update now',purgeNow:'Purge snapshots',queued:'queued',running:'updating…',
+    checkNow:'Check for updates',checkTitle:'Pending updates',checkNone:'No pending updates',
+    checkChecking:'checking…',checkNever:'Not checked yet — click “Check now”.',checkAgain:'Check now',
+    checkLastChecked:'last checked',checkAgentNeeded:'no guest agent — cannot check',checkFailed:'check failed',
+    durEstTip:'Estimated runtime, from the last pending-updates check (Windows cumulative / Linux kernel packages reserve a wider slot). Unchecked guests use the default spacing.',
     confirmSnapAll:'Take a snapshot now on every container?',confirmUpdAll:'Run updates now on every container? (nothing-to-do containers are skipped)',
     confirmPurgeAll:'Delete ALL managed snapshots (preupd_/auto_) on every container? Manual snapshots are kept.',
     confirmSnap:'Take a snapshot now on CT',confirmUpd:'Run the update now on CT',
@@ -707,7 +737,7 @@ const I18N={
     cadUiTip:'Auto-odświeżanie panelu — co 5 s (60 s w kreatorze)',
     containers:'Kontenery',log:'Log',logout:'Wyloguj',pause:'Pauza',resume:'Wznów',pauseTag:'PAUZA',linesLbl:'linii',
     logFilterPh:'filtruj tekst…',logCatAll:'Wszystkie zdarzenia',logCatAudit:'Audyt (zmiany)',logCatTask:'Zadania',logCatError:'Błędy / rollback',logCsv:'Eksport CSV',
-    wizard:'Kreator',themeWord:'Motyw',change:'Zmień',
+    wizard:'Ustawienia',themeWord:'Motyw',change:'Zmień',
     thName:'Maszyna',thSystem:'System',thBackup:'Backup',thSnaps:'Migawki',thSchedule:'Harmonogram',thScope:'Zakres + health',thLast:'Ostatnio',
     edit:'Edytuj',disabled:'wyłączony',allDays:'codz.',paused:'pauza',
     refresh:'Odśwież',autoLbl:'auto (5 s)',logMeta:'ostatnie 200 linii',empty:'(pusto)',
@@ -723,6 +753,9 @@ const I18N={
     wizHostNote:'adminupdater robi to sam na hoście (apt upgrade z host.conf → host_update_cmd, wymaga host_update=on) — to NIE zewnętrzny skrypt. Pokazuje się jako pomarańczowy wiersz w oknie serwisowym poniżej; w tę samą noc planer trzyma aktualizacje LXC z dala od tego slotu.',
     kManaged:'Zarządzane',kManagedS:'z {n} maszyn na hoście',kCurrent:'Aktualne',kCurrentS:'po ostatnim runie',
     kPending:'Oczekują',kPendingS:'zaplanowane wkrótce',kProblems:'Problemy',kProblemsS:'rollback / health-check',
+    kUpdatesFound:'Znalezione aktualizacje',kUpdatesFoundS:'sprawdzono {a} / {b} maszyn',
+    lowDiskChip:'⚠ mało miejsca',diskAlertTitle:'{n} maszyn(y) wstrzymane — za mało wolnego miejsca na aktualizację',
+    diskAlertLine:'{f} MB wolne (potrzeba ≥ {m} MB)',
     kCoverage:'Pokrycie backupem',kCoverageS:'{a} / {b} ma świeżą kopię',kNext:'Najbliższy run',kNextS:'{n} maszyn',kNextNone:'brak runu',
     noWindows:'nie wykryto okna backupu',noBackupPlan:'brak backupu → pominięte',blockedNoBackup:'bez backupu → nie ruszam',
     noAgent:'brak guest agenta',noAgentHint:'QEMU Guest Agent nie odpowiada — zainstaluj/uruchom go w VM i włącz „agent: 1” w jej konfiguracji',
@@ -751,6 +784,10 @@ const I18N={
     hostNote:'Komenda jest po stronie hosta (host.conf → host_update_cmd) i wymaga host_update=on.',
     proposeBtn:'Zaplanuj harmonogram',bulkSnap:'Migawka wszystkim',bulkUpd:'Aktualizuj wszystkie',bulkPurge:'Usuń migawki wszystkim',
     snapNow:'Migawka teraz',updNow:'Aktualizuj teraz',purgeNow:'Usuń migawki',queued:'w kolejce',running:'aktualizuję…',
+    checkNow:'Sprawdź aktualizacje',checkTitle:'Zaległe aktualizacje',checkNone:'Brak zaległych aktualizacji',
+    checkChecking:'sprawdzam…',checkNever:'Jeszcze nie sprawdzano — kliknij „Sprawdź teraz”.',checkAgain:'Sprawdź teraz',
+    checkLastChecked:'ostatnio sprawdzono',checkAgentNeeded:'brak guest agenta — nie można sprawdzić',checkFailed:'sprawdzenie nieudane',
+    durEstTip:'Szacowany czas trwania, z ostatniego sprawdzenia zaległych aktualizacji (cumulative update Windows / pakiety jądra Linux rezerwują szerszy slot). Nigdy niesprawdzone maszyny używają domyślnego odstępu.',
     confirmSnapAll:'Zrobić migawkę teraz na każdym kontenerze?',confirmUpdAll:'Uruchomić aktualizacje teraz na każdym kontenerze? (kontenery bez nic do zrobienia są pomijane)',
     confirmPurgeAll:'Usunąć WSZYSTKIE zarządzane migawki (preupd_/auto_) na każdym kontenerze? Ręczne pozostają.',
     confirmSnap:'Zrobić migawkę teraz na CT',confirmUpd:'Uruchomić aktualizację teraz na CT',
@@ -886,6 +923,11 @@ function renderHostbar(h){
 }
 
 // ---------- KPI tiles ----------
+function checkClean(rc){
+  if(!rc||rc.status!=='ok')return null;   // unknown (never checked / check failed)
+  const items=rc.pending||[];
+  return items.length===0||(items.length===1&&/^OK:/.test(items[0]));
+}
 function renderKpis(g){
   const total=g.length,managed=g.filter(x=>x.config.enabled).length;
   const ok=g.filter(x=>x.report&&x.report.status==='ok').length;
@@ -893,12 +935,16 @@ function renderKpis(g){
   const fresh=g.filter(x=>x.backup&&x.backup.fresh).length;
   const cov=total?Math.round(fresh/total*100):0;
   const nr=nextRunInfo(g);
+  const checkedN=g.filter(x=>checkClean(x.report_check)!==null).length;
+  const updPending=g.filter(x=>checkClean(x.report_check)===false).length;
   const tiles=[
     {rail:'acc',k:t('kManaged'),v:managed,s:t('kManagedS',{n:total})},
     {rail:'good',k:t('kCurrent'),v:ok,cls:'good',s:t('kCurrentS')},
     {rail:'warn',k:t('kPending'),v:nr?nr.count:0,cls:'warn',s:t('kPendingS')},
     {rail:'crit',k:t('kProblems'),v:problems,cls:problems?'crit':'',s:t('kProblemsS')},
     {rail:'good',k:t('kCoverage'),v:cov+'%',cover:cov,s:t('kCoverageS',{a:fresh,b:total})},
+    {rail:updPending?'warn':'good',k:t('kUpdatesFound'),v:updPending,cls:updPending?'warn':'good',
+     s:t('kUpdatesFoundS',{a:checkedN,b:total})},
     {rail:'acc',k:t('kNext'),v:nr?nr.time:'—',small:1,s:nr?t('kNextS',{n:nr.count}):t('kNextNone')},
   ];
   el('kpis').innerHTML=tiles.map(x=>`<div class="tile"><span class="rail ${x.rail}"></span>
@@ -1039,10 +1085,18 @@ function backupChip(g){
     ageTxt=h<48?`${h} h`:`${Math.round(h/24)} d`;}
   return b.fresh?`<span class="chip good">${ic('check')} ${ageTxt}</span>`:`<span class="chip warn">${ic('alert')} ${ageTxt}</span>`;
 }
+function renderDiskAlert(guests){
+  const bad=guests.filter(g=>g.report&&g.report.status==='low-disk');
+  const box=el('diskAlert');
+  if(!bad.length){box.innerHTML='';return;}
+  box.innerHTML=`<div class="diskalert"><div class="dh">${ic('alert')} ${t('diskAlertTitle',{n:bad.length})}</div>
+    <ul>${bad.map(g=>`<li><span>${g.name||''} <span class="muted mono">${g.vmid}</span></span>
+      <span class="mono">${g.report.disk_free_mb!=null?t('diskAlertLine',{f:g.report.disk_free_mb,m:g.report.disk_min_mb}):''}</span></li>`).join('')}</ul></div>`;
+}
 function render(){
   if(!DATA.guests)return;
   const d=DATA;
-  renderHostbar(d.host);renderKpis(d.guests);renderGantt(d);
+  renderHostbar(d.host);renderKpis(d.guests);renderGantt(d);renderDiskAlert(d.guests);
   el('pauseBtn').innerHTML=ic(SET.paused?'play':'pause')+' '+(SET.paused?t('resume'):t('pause'));
   el('pausewrap').innerHTML=SET.paused?`<span class="pausetag">${t('pauseTag')}</span>`:'';
   const QMAP=DATA._queue||{};
@@ -1064,7 +1118,7 @@ function render(){
     if(g.running)last=`<span class="run"><span class="spin"></span> ${t('running')}</span>`;
     else if(noAgent)last=`<span class="chip warn" title="${t('noAgentHint')}">${ic('alert')} ${t('noAgent')}</span>`;
     else if(g.blocked_no_backup)last=`<span class="chip warn">${t('blockedNoBackup')}</span>`;
-    else if(r)last=`<span class="chip ${r.status==='ok'?'good':'crit'}">${r.status==='ok'?'OK':(r.status==='rollback'?'↺ rollback':r.status)}</span> <span class="muted mono">${(r.ts||'').slice(11,16)}</span>${queued}`;
+    else if(r)last=`<span class="chip ${r.status==='ok'?'good':(r.status==='low-disk'?'warn':'crit')}">${r.status==='ok'?'OK':(r.status==='rollback'?'↺ rollback':(r.status==='low-disk'?t('lowDiskChip'):r.status))}</span> <span class="muted mono">${(r.ts||'').slice(11,16)}</span>${queued}`;
     else last=`<span class="muted">—</span>${queued}`;
     const tr=document.createElement('tr');tr.dataset.vmid=g.vmid;
     if(noAgent||g.blocked_no_backup||(r&&r.status!=='ok'))tr.className='rowwarn';
@@ -1077,6 +1131,7 @@ function render(){
       <td><span class="chip idle">${scope}</span> ${hcChip} ${rebootChip}</td>
       <td>${last}</td>
       <td class="acts">
+        <button data-act="check" title="${t('checkNow')}">${ic('logs')}</button>
         <button data-act="snapshot" title="${t('snapNow')}">${ic('camera')}</button>
         <button data-act="update" title="${t('updNow')}">${ic('refresh')}</button>
         <button data-act="purge" title="${t('purgeNow')}">${ic('trash')}</button>
@@ -1092,9 +1147,14 @@ async function load(){
     fetch('/api/queue').then(r=>r.json()).catch(()=>({queue:[]}))]);
   SET=d.settings||{};HU=d.host_update||{};
   const QMAP={};for(const j of (q.queue||[]))QMAP[j.ctid]=true;
-  d._queue=QMAP;DATA=d;
+  const CHECKQ={};for(const j of (q.queue||[]))if(j.kind==='check')CHECKQ[j.ctid]=true;
+  d._queue=QMAP;d._checkq=CHECKQ;DATA=d;
   el('nodeName').textContent=(d.host&&d.host.pve)?d.host.pve:'PVE';
   render();
+  if(CHECK_VMID!=null&&el('cdlg').open){
+    const g=(d.guests||[]).find(x=>x.vmid===CHECK_VMID);
+    if(g)renderCheckBody(g);
+  }
   loadHealth();
 }
 
@@ -1152,10 +1212,49 @@ async function postAction(action,vmids){
 }
 function rowAction(act,g){
   if(act==='edit')return edit(g);
+  if(act==='check')return openCheck(g);
   if(act==='snapshot'&&!confirm(`${t('confirmSnap')} ${g.vmid}?`))return;
   if(act==='update'&&!confirm(`${t('confirmUpd')} ${g.vmid}?`))return;
   if(act==='purge'&&!confirm(`${t('confirmPurge')} ${g.vmid}${t('keepManual')}`))return;
   postAction(act,[g.vmid]);
+}
+
+// ---------- pending-updates check (read-only, no login needed) ----------
+let CHECK_VMID=null;
+function openCheck(g){
+  CHECK_VMID=g.vmid;
+  el('cTitle').textContent=`${t('checkTitle')} — ${g.name||''} (${g.vmid})`;
+  renderCheckBody(g);
+  el('cdlg').showModal();
+  // no cached result yet, or the guest agent is known-missing -> nothing to poll for
+  const noAgent=g.gtype==='qemu'&&g.agent_ok===false;
+  if(!g.report_check&&!g.running&&!noAgent)runCheck(g.vmid);
+}
+async function runCheck(vmid){
+  await fetch('/api/actions',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({action:'check',vmids:[vmid]})});
+  load();
+}
+el('cRefresh').onclick=()=>{if(CHECK_VMID!=null)runCheck(CHECK_VMID);};
+el('cdlg').addEventListener('close',()=>{CHECK_VMID=null;});
+function renderCheckBody(g){
+  const box=el('cBody'),meta=el('cMeta');
+  const noAgent=g.gtype==='qemu'&&g.agent_ok===false;
+  const inQueue=(DATA._checkq||{})[g.vmid];
+  if(noAgent){box.innerHTML=`<p class="chip warn">${ic('alert')} ${t('checkAgentNeeded')}</p>`;meta.textContent='';return;}
+  if(g.running||inQueue){box.innerHTML=`<p class="run"><span class="spin"></span> ${t('checkChecking')}</p>`;meta.textContent='';return;}
+  const rc=g.report_check;
+  if(!rc){box.innerHTML=`<p class="muted">${t('checkNever')}</p>`;meta.textContent='';return;}
+  if(rc.status==='error'){
+    const log=(rc.steps&&rc.steps[0]&&rc.steps[0].log)||'';
+    box.innerHTML=`<p class="chip crit">${ic('alert')} ${t('checkFailed')}</p><pre class="checklog">${(log+'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</pre>`;
+  } else {
+    const items=rc.pending||[];
+    const clean=items.length===0||(items.length===1&&/^OK:/.test(items[0]));
+    if(clean)box.innerHTML=`<p class="chip good">${ic('check')} ${t('checkNone')}</p>`;
+    else box.innerHTML=`<ul class="checklist">${items.map(l=>`<li>${l.replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</li>`).join('')}</ul>`;
+  }
+  meta.textContent=rc.ts?`${t('checkLastChecked')}: ${(rc.ts||'').slice(0,16).replace('T',' ')}`:'';
 }
 const allVmids=()=>[...el('rows').querySelectorAll('tr')].map(tr=>+tr.dataset.vmid).filter(Boolean);
 el('bulkSnap').onclick=()=>{const v=allVmids();if(v.length&&confirm(t('confirmSnapAll')))postAction('snapshot',v);};
@@ -1212,7 +1311,7 @@ function renderPlan(p,box,applyBtn){
     if(!pd.items.length)continue;
     const zt=(pd.forbidden||[]).map(z=>`${z.start}–${z.end}`).join(', ')||'—';
     html+=`<div class="nightgrp"><div class="nighthd"><b>${wd(pd.weekday)}</b> <span class="muted">${pd.items.length}/${pd.cap} · ${t('forbiddenZones')}: ${zt}</span></div>
-      <div class="covlist">${pd.items.map(it=>`<div class="r"><span>${it.name||''} <span class="muted mono">${it.vmid}</span></span><b class="mono">${it.time}</b></div>`).join('')}</div></div>`;
+      <div class="covlist">${pd.items.map(it=>`<div class="r"><span>${it.name||''} <span class="muted mono">${it.vmid}</span></span><b class="mono">${it.time}</b> <span class="muted mono" title="${t('durEstTip')}">~${it.duration_min}min</span></div>`).join('')}</div></div>`;
   }
   if((p.unplaceable||[]).length)html+=`<p class="note" style="color:var(--crit)">${t('unplaceableLbl')}: ${p.unplaceable.join(', ')}</p>`;
   box.innerHTML=html;
