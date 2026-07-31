@@ -1,5 +1,9 @@
 # proxmox-adminupdater
 
+[![GitHub stars](https://img.shields.io/github/stars/Kr1sCode/proxmox-adminupdater?style=flat)](https://github.com/Kr1sCode/proxmox-adminupdater/stargazers)
+[![License](https://img.shields.io/badge/license-homelab--free-blue)](LICENSE)
+[![Last commit](https://img.shields.io/github/last-commit/Kr1sCode/proxmox-adminupdater)](https://github.com/Kr1sCode/proxmox-adminupdater/commits/main)
+
 **Scheduled updates for your whole Proxmox fleet — LXC containers and QEMU VMs
 (Linux, auto-detected distro, and Windows) alike — no SSH, driven from a clean web UI.**
 

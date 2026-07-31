@@ -1,0 +1,32 @@
+name: Archive traffic stats
+
+# GitHub's own Insights -> Traffic view only keeps 14 days of views/clones and
+# never shows it publicly. This appends each day's numbers to CSV files in
+# .github/traffic/ so the history survives past the 14-day window.
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch and append traffic stats
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 .github/scripts/archive_traffic.py
+
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .github/traffic/
+          git diff --cached --quiet || git commit -m "chore: archive traffic stats"
+          git push
