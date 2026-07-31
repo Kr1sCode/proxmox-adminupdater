@@ -34,6 +34,7 @@ GUEST_DEFAULTS = {
     "times": ["03:30"],          # calendar mode
     "weekdays": [6],             # calendar mode: Sunday ([] = every day)
     "security_patch": True,      # OS patch upgrade (distro auto-detected on host)
+    "win_update_scope": "all",   # Windows guests only: "all" | "security" (Security+Critical only)
     "app_update": None,          # None, or a recipe name present in host recipes dir
     "pre_snapshot": True,        # rollback snapshot before touching the guest
     "keep": None,                # preupd_ retention: keep newest N (0 = off); None = inherit
@@ -100,6 +101,8 @@ def build_update_job(g, vmid, sett):
         "ctid": int(vmid),
         "actions": actions,
         "app": str(app) if app else None,
+        # honoured only for a Windows guest's security-patch step; ignored elsewhere
+        "win_update_scope": "security" if g.get("win_update_scope") == "security" else "all",
         "pre_snapshot": bool(g["pre_snapshot"]),
         "snapshot_prefix": sett["snapshot_prefix"],
         "rollback_on_fail": bool(sett["rollback_on_fail"]),

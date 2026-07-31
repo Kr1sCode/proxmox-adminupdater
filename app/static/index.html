@@ -472,6 +472,14 @@
     </div></div>
     <div id="intBox" style="display:none"><label data-i18n="everyMinLbl">Every N minutes</label><input type="number" id="dInterval" value="10080"></div>
     <div class="row" style="margin-top:.7rem"><input type="checkbox" id="dSec"><label style="margin:0" data-i18n="secPatch">OS package updates</label></div>
+    <div id="dWinScopeRow" class="row" style="margin-top:.4rem;gap:.6rem;align-items:center">
+      <label class="thin" style="margin:0" data-i18n="winScopeTitle">Windows Update scope</label>
+      <select id="dWinScope" style="max-width:320px">
+        <option value="all" data-i18n="winScopeAll">All applicable updates</option>
+        <option value="security" data-i18n="winScopeSec">Security + Critical updates only</option>
+      </select>
+    </div>
+    <p id="dWinScopeNoteP" class="note" data-i18n="winScopeNote">Windows guests only.</p>
     <label data-i18n="appTitle">Application update</label>
     <select id="dAppMode">
       <option value="none" data-i18n="appNone">— none —</option>
@@ -656,7 +664,9 @@ const I18N={
     noAgent:'no guest agent',noAgentHint:'QEMU Guest Agent not responding — install/start it in the VM and enable "agent: 1" on it',
     enabled:'Enabled',schedMode:'Schedule mode',calendar:'Calendar (days/time)',calendarShort:'Calendar',interval:'Interval',
     timeLbl:'Time (HH:MM)',daysLbl:'Days (0=Mon…6=Sun, empty=daily)',daysShort:'Days (empty=daily)',everyMinLbl:'Every N minutes',
-    secPatch:'OS package updates (apt/apk/pacman upgrade)',
+    secPatch:'OS security patches (apt/apk/pacman/dnf upgrade, or Windows Update)',
+    winScopeTitle:'Windows Update scope',winScopeAll:'All applicable updates',winScopeSec:'Security + Critical updates only',
+    winScopeNote:'Windows guests only — ignored for Linux/LXC. "Security + Critical" installs just those two Microsoft update classifications, skipping feature/driver/optional updates.',
     appTitle:'Application update',appNone:'— none —',appAuto:'Auto-detect (community-scripts /usr/bin/update)',appRecipeOpt:'Host recipe (by name)',appRecipePh:'recipe name (without .sh)',
     autoReboot:'Reboot after update, then verify it comes back',
     rebModeLbl:'When to restart',
@@ -720,8 +730,8 @@ const I18N={
     wizSchedLead:'I place updates into your maintenance window and skip every backup window. Adjust and press Propose.',
     wizPreviewHint:'The proposal appears live in the service window below — accept it at the last step.',
     wizPreviewBadge:'Proposed schedule (preview) — not applied until you finish the wizard',
-    wizScopeLead:'Default policy applied to enrolled containers with a fresh backup:',
-    wizScopeSec:'OS package updates (apt/apk/pacman)',wizScopeApp:'Application update',wizScopeAppNote:'Auto-detect runs each container’s own community-scripts updater; non-helper containers are skipped safely.',
+    wizScopeLead:'Default policy applied to enrolled guests with a fresh backup:',
+    wizScopeSec:'OS security patches (Linux packages, or Windows Update)',wizScopeApp:'Application update',wizScopeAppNote:'Auto-detect runs each container’s own community-scripts updater; non-helper containers (and all VMs) are skipped safely.',
     wizScopeReboot:'Reboot after update if required (then verify it comes back)',
     wizScopeHc:'Health-check',wizScopeHcNote:'“auto” is universal — it just checks the container came back up. Set a systemd/HTTP target per machine in Edit if you want a stricter probe.',
     wizNotifLead:'Email reports go through the Proxmox host mail transport (postfix/sendmail) you already configured.',
@@ -761,7 +771,9 @@ const I18N={
     noAgent:'brak guest agenta',noAgentHint:'QEMU Guest Agent nie odpowiada — zainstaluj/uruchom go w VM i włącz „agent: 1” w jej konfiguracji',
     enabled:'Włączony',schedMode:'Tryb harmonogramu',calendar:'Kalendarz (dni/godzina)',calendarShort:'Kalendarz',interval:'Interwał',
     timeLbl:'Godzina (HH:MM)',daysLbl:'Dni (0=Pn…6=Nd, pusto=codz.)',daysShort:'Dni (pusto=codz.)',everyMinLbl:'Co ile minut',
-    secPatch:'Aktualizacje pakietów OS (apt/apk/pacman upgrade)',
+    secPatch:'Patche bezpieczeństwa OS (apt/apk/pacman/dnf upgrade, albo Windows Update)',
+    winScopeTitle:'Zakres Windows Update',winScopeAll:'Wszystkie dostępne aktualizacje',winScopeSec:'Tylko Security + Critical',
+    winScopeNote:'Dotyczy tylko gości Windows — dla Linux/LXC ignorowane. „Tylko Security + Critical” instaluje wyłącznie te dwie klasyfikacje aktualizacji Microsoftu, pomijając funkcjonalne/sterowniki/opcjonalne.',
     appTitle:'Aktualizacja aplikacji',appNone:'— brak —',appAuto:'Autowykrywanie (community-scripts /usr/bin/update)',appRecipeOpt:'Recepta hosta (po nazwie)',appRecipePh:'nazwa recepty (bez .sh)',
     autoReboot:'Restart po aktualizacji, z weryfikacją powrotu',
     rebModeLbl:'Kiedy restartować',
@@ -824,8 +836,8 @@ const I18N={
     wizSchedLead:'Układam aktualizacje w Twoim oknie serwisowym i omijam każde okno backupu. Dostrój i naciśnij Zaproponuj.',
     wizPreviewHint:'Propozycja pojawia się na żywo w oknie serwisowym poniżej — zatwierdzisz ją w ostatnim kroku.',
     wizPreviewBadge:'Proponowany harmonogram (podgląd) — zostanie zastosowany dopiero po zakończeniu kreatora',
-    wizScopeLead:'Domyślna polityka dla włączonych kontenerów ze świeżym backupem:',
-    wizScopeSec:'Aktualizacje pakietów OS (apt/apk/pacman)',wizScopeApp:'Aktualizacja aplikacji',wizScopeAppNote:'Autowykrywanie uruchamia własny updater community-scripts w kontenerze; kontenery bez niego są bezpiecznie pomijane.',
+    wizScopeLead:'Domyślna polityka dla włączonych maszyn ze świeżym backupem:',
+    wizScopeSec:'Patche bezpieczeństwa OS (pakiety Linux, albo Windows Update)',wizScopeApp:'Aktualizacja aplikacji',wizScopeAppNote:'Autowykrywanie uruchamia własny updater community-scripts w kontenerze; kontenery bez niego (i wszystkie VM) są bezpiecznie pomijane.',
     wizScopeReboot:'Restart po aktualizacji jeśli wymagany (z weryfikacją powrotu)',
     wizScopeHc:'Health-check',wizScopeHcNote:'„auto" jest uniwersalny — sprawdza tylko, czy kontener wstał. Dla ostrzejszej sondy ustaw cel systemd/HTTP per maszyna w Edytuj.',
     wizNotifLead:'Raporty e-mail idą przez pocztę hosta Proxmox (postfix/sendmail), którą już skonfigurowałeś.',
@@ -966,13 +978,16 @@ function renderGantt(d){
   el('ganttAxis').innerHTML=ticks.map(m=>{const p=ribPct(m),tx=p<=1?'0':(p>=99?'-100%':'-50%');
     return `<span style="left:${p}%;transform:translateX(${tx})">${fmtMin(m)}</span>`;}).join('');
   const grid=ticks.map(m=>`<i style="left:${ribPct(m)}%"></i>`).join('');
-  el('ribbonHint').textContent=WIZPREVIEW?('● '+t('wizPreviewBadge')):((inv.windows&&inv.windows.length)?t('ribbonHint'):'— '+t('noWindows'));
+  // while the wizard is proposing, render the PROPOSED placement here instead of the
+  // saved schedule, so the plan appears in the real service window before it's applied.
+  // Also active whenever WSEL exists (step 2+ of the wizard) even with an empty/no plan
+  // yet, so an unticked machine visibly drops out immediately, not only once placed.
+  const wizPreviewing=WIZPREVIEW||(WSEL&&!el('wiz').hidden);
+  el('ribbonHint').textContent=wizPreviewing?('● '+t('wizPreviewBadge')):((inv.windows&&inv.windows.length)?t('ribbonHint'):'— '+t('noWindows'));
 
   // --- week view: pick which night to show (chips = per-night machine counts) ---
   const gwd=x=>(x.config.weekdays&&x.config.weekdays.length)?(x.config.weekdays[0]%7):6;
-  // while the wizard is proposing, render the PROPOSED placement here instead of the
-  // saved schedule, so the plan appears in the real service window before it's applied
-  const G=WIZPREVIEW?previewGuests(d):(d.guests||[]);
+  const G=wizPreviewing?previewGuests(d):(d.guests||[]);
   const dayCount={};
   for(const x of G){if(x.config.enabled&&x.config.mode==='calendar')dayCount[gwd(x)]=(dayCount[gwd(x)]||0)+1;}
   // full week view: every night is shown (Mon..Sun), empty ones included — so a quiet
@@ -1295,7 +1310,10 @@ async function doPropose(vmids){
   await fetch('/api/maintenance',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({window_start:el('mStart').value.trim(),window_end:el('mEnd').value.trim(),
       days,spacing_min:Math.max(1,+el('mSpace').value||20),concurrency:Math.max(1,+el('mConc').value||1)})});
-  const q=(vmids&&vmids.length)?('?vmids='+vmids.join(',')):'';
+  // vmids===undefined -> no filter (the standalone "Plan schedule" dialog); an ARRAY,
+  // even empty, is an explicit wizard selection -- "?vmids=" with nothing after it means
+  // place none, not "unfiltered" (the server tells the two apart by param presence).
+  const q=(vmids!==undefined)?('?vmids='+vmids.join(',')):'';
   PLAN=await fetch('/api/schedule/propose'+q).then(r=>r.json());return PLAN;
 }
 el('mPropose').onclick=async()=>{renderPlan(await doPropose(),el('mPreview'),el('mApply'));};
@@ -1337,6 +1355,7 @@ function applyGtypeGates(g){
   const sdOpt=el('dHcType').querySelector('option[value="systemd"]');
   if(sdOpt)sdOpt.style.display=(isLxc&&!isWin)?'':'none';
   for(const id of['dRbRow','dRbWrap','dRbNoteP'])el(id).style.display=isLxc?'':'none';
+  for(const id of['dWinScopeRow','dWinScopeNoteP'])el(id).style.display=isWin?'':'none';
 }
 function edit(g){
   const c=g.config;const kind=g.gtype==='qemu'?'VM':'CT';
@@ -1345,6 +1364,7 @@ function edit(g){
   el('dEnabled').checked=c.enabled;el('dMode').value=c.mode;
   el('dTime').value=(c.times||['03:30'])[0];el('dDays').value=(c.weekdays||[]).join(',');
   el('dInterval').value=c.interval_minutes;el('dSec').checked=c.security_patch;
+  el('dWinScope').value=c.win_update_scope==='security'?'security':'all';
   const app=c.app_update;
   el('dAppMode').value=app==='auto'?'auto':(app?'recipe':'none');
   el('dApp').value=(app&&app!=='auto')?app:'';
@@ -1376,6 +1396,7 @@ async function save(vmid){
   const body={enabled:el('dEnabled').checked,mode:el('dMode').value,times:[el('dTime').value.trim()],
     weekdays:el('dDays').value.split(',').map(x=>x.trim()).filter(x=>x!=='').map(Number),
     interval_minutes:+el('dInterval').value||10080,security_patch:el('dSec').checked,
+    win_update_scope:el('dWinScope').value==='security'?'security':'all',
     app_update:app,pre_snapshot:el('dSnap').checked,auto_reboot:el('dReboot').checked,
     reboot_mode:el('dRebMode').value,offline_mode:el('dOff').value,
     ram_boost:el('dRb').checked,ram_boost_mb:Math.max(512,parseInt(el('dRbMb').value,10)||4096),
@@ -1486,7 +1507,7 @@ function renderNotifyPreview(){
 }
 
 // ---------- WIZARD ----------
-let WSTEP=1;const WSCOPE={sec:true,app:'auto',reboot:true,rebootMode:'required',hc:'auto'};
+let WSTEP=1;const WSCOPE={sec:true,winScope:'all',app:'auto',reboot:true,rebootMode:'required',hc:'auto'};
 let WSEL=null;   // Set of vmids to enroll (null = not yet initialised)
 let WIZPREVIEW=null;   // when set, the timeline below renders this PROPOSED plan live
 function forceWindowTab(){
@@ -1497,13 +1518,20 @@ function forceWindowTab(){
 }
 function openWizard(){
   WSTEP=1;WSEL=null;PLAN=null;WIZPREVIEW=null;
+  // seed the (shared) maintenance-window fields from the real saved settings right away,
+  // so a proposal triggered from step 2 (before step 3 is ever visited) uses them instead
+  // of the schedule dialog's hardcoded HTML defaults.
+  const m=DATA.maintenance||{};
+  el('mStart').value=m.window_start||'01:30';el('mEnd').value=m.window_end||'05:00';
+  el('mSpace').value=m.spacing_min||20;el('mConc').value=m.concurrency||1;
+  fillDayPick('mDays',m.days||[6]);
   forceWindowTab();                       // the service window is what shows below the dock
   document.body.classList.add('wiz-open');
   el('wiz').hidden=false;
   renderWiz();bootIcons(el('wiz'));
   render();                               // refresh the timeline underneath
   startWizRefresh();                      // keep inventory live in the background
-  const m=document.querySelector('main'); if(m)m.scrollTop=0;
+  const mn=document.querySelector('main'); if(mn)mn.scrollTop=0;
 }
 function closeWizard(done){
   if(done)localStorage.setItem('au_wizard_done','1');
@@ -1516,21 +1544,42 @@ el('openWiz').onclick=openWizard;
 el('wizClose').onclick=()=>closeWizard(true);
 el('wizBack').onclick=()=>{if(WSTEP>1){WSTEP--;renderWiz();}};
 // build the guest list the timeline renders while previewing: planned machines get
-// their PROPOSED night+time; everything else keeps its saved schedule for context
+// their PROPOSED night+time; a guest unticked on step 2 is shown as excluded (disabled)
+// instead of falling back to its old real schedule, so unchecking it is visible right
+// away instead of only after the wizard is finished; everything else (not yet placed,
+// still selected -- e.g. no fresh backup) keeps its saved schedule for context
 function previewGuests(d){
   const plan=(WIZPREVIEW&&WIZPREVIEW.plan)||[];const by={};for(const p of plan)by[p.vmid]=p;
-  return (d.guests||[]).map(x=>{const p=by[x.vmid];if(!p)return x;
-    return {...x,_preview:true,config:{...x.config,enabled:true,mode:'calendar',times:[p.time],weekdays:[p.weekday]}};});
+  return (d.guests||[]).map(x=>{
+    const p=by[x.vmid];
+    if(p)return {...x,_preview:true,config:{...x.config,enabled:true,mode:'calendar',times:[p.time],weekdays:[p.weekday]}};
+    if(WSEL&&!WSEL.has(x.vmid))return {...x,_preview:true,config:{...x.config,enabled:false}};
+    return x;});
 }
-// push the current PLAN into the live timeline preview and re-render underneath
-function wizSyncPreview(){
+// push the current PLAN into the live timeline preview and re-render underneath.
+// scroll=true brings the timeline into view -- only for a deliberate action (Dalej,
+// the Zaproponuj button); a checkbox/field auto-refresh stays scroll=false so it
+// doesn't yank the page out from under someone still ticking boxes.
+function wizSyncPreview(scroll){
   WIZPREVIEW=(PLAN&&PLAN.plan&&PLAN.plan.length)?PLAN:null;
   GDAY=null;                              // let the timeline pick the busiest proposed night
   if(!el('wiz').hidden){render();
     // bring the service window into view just below the docked wizard (scroll-padding
     // keeps it clear of the sticky sheet) so the proposal is immediately visible
-    if(WIZPREVIEW)requestAnimationFrame(()=>{const sw=el('ganttDays');if(sw)sw.scrollIntoView({behavior:'smooth',block:'start'});});
+    if(scroll&&WIZPREVIEW)requestAnimationFrame(()=>{const sw=el('ganttDays');if(sw)sw.scrollIntoView({behavior:'smooth',block:'start'});});
   }
+}
+// re-propose against the CURRENT wizard selection/window and repaint the live preview
+// (both the timeline underneath and, if step 3 is showing, its own #wPreview list).
+// A sequence token drops a stale response if the user changed something else while
+// this request was in flight (rapid checkbox toggling on step 2).
+let WIZPROPOSE_SEQ=0;
+async function wizProposeAndSync(scroll){
+  const seq=++WIZPROPOSE_SEQ;
+  const p=await doPropose([...(WSEL||[])]);
+  if(seq!==WIZPROPOSE_SEQ)return;         // superseded by a newer change
+  wizSyncPreview(scroll);
+  const wp=el('wPreview'); if(wp)renderPlan(p,wp,null);
 }
 async function applyWizHost(){
   if(!el('wHostEn'))return;
@@ -1541,7 +1590,7 @@ async function applyWizHost(){
   await fetch('/api/host-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 }
 el('wizNext').onclick=async()=>{
-  if(WSTEP===3){await applyWizHost(); if(!PLAN)await doPropose([...(WSEL||[])]); wizSyncPreview();}   // save host anchor + ensure a proposal + live preview
+  if(WSTEP===3){await applyWizHost(); await wizProposeAndSync(true);}   // save host anchor + refresh the live preview
   if(WSTEP<5){WSTEP++;renderWiz();return;}
   await wizFinish();
 };
@@ -1599,8 +1648,10 @@ function renderWiz(){
         <span style="overflow:hidden;text-overflow:ellipsis">${x.name} <span class="muted mono">${x.vmid}</span> <span class="os">${osIcon(x.os)} ${x.os||''}</span></span></label>${st}</div>`;}).join('');
     b.innerHTML=`<p style="color:var(--ink-dim)">${t('wizCovLead')}</p><div class="covlist">${rows}</div>
       <p class="note">${t('wizCovNote',{n:WSEL.size})}</p>`;
-    b.querySelectorAll('.wsel').forEach(c=>c.onchange=()=>{const v=+c.dataset.vmid;c.checked?WSEL.add(v):WSEL.delete(v);PLAN=null;
-      b.querySelector('.note').textContent=t('wizCovNote',{n:WSEL.size});});
+    b.querySelectorAll('.wsel').forEach(c=>c.onchange=()=>{const v=+c.dataset.vmid;c.checked?WSEL.add(v):WSEL.delete(v);
+      b.querySelector('.note').textContent=t('wizCovNote',{n:WSEL.size});
+      wizProposeAndSync(false);});          // reflect the (un)tick in the service window right away
+    wizProposeAndSync(false);               // baseline preview as soon as this step is shown
   }else if(WSTEP===3){
     b.innerHTML=`<p style="color:var(--ink-dim)">${t('wizSchedLead')}</p>
       <div class="prop" style="background:linear-gradient(90deg,var(--warn-bg),transparent 70%)">
@@ -1622,16 +1673,34 @@ function renderWiz(){
     el('wHostTime').value=(HU.times||['02:00'])[0];
     fillDayPick('wHostDays',(HU.weekdays&&HU.weekdays.length)?HU.weekdays:[5]);
     fillDayPick('wDays',(DATA.maintenance||{}).days||[6]);
-    el('wPropose').onclick=async()=>{
+    // any of these change WHERE things land -> mirror into the (shared) maintenance
+    // fields, save the host anchor, and re-propose. Explicit button click scrolls the
+    // preview into view; typing/toggling a field just repaints it in place.
+    const syncAndPropose=scroll=>async()=>{
       el('mStart').value=el('wStart').value;el('mEnd').value=el('wEnd').value;el('mSpace').value=el('wSpace').value;
       fillDayPick('mDays',readDayPick('wDays'));
       await applyWizHost();
-      renderPlan(await doPropose([...(WSEL||[])]),el('wPreview'),null);
-      wizSyncPreview();};                  // paint the proposal into the timeline below
-    if(PLAN){renderPlan(PLAN,el('wPreview'),null);wizSyncPreview();}
+      await wizProposeAndSync(scroll);};
+    el('wPropose').onclick=syncAndPropose(true);
+    el('wStart').onchange=syncAndPropose(false);
+    el('wEnd').onchange=syncAndPropose(false);
+    el('wSpace').onchange=syncAndPropose(false);
+    el('wHostEn').onchange=syncAndPropose(false);
+    el('wHostTime').onchange=syncAndPropose(false);
+    b.querySelectorAll('#wDays input,#wHostDays input').forEach(c=>c.onchange=syncAndPropose(false));
+    if(PLAN){renderPlan(PLAN,el('wPreview'),null);wizSyncPreview(false);}
+    else syncAndPropose(false)();          // first time on this step -> paint a baseline proposal
   }else if(WSTEP===4){
     b.innerHTML=`<p style="color:var(--ink-dim)">${t('wizScopeLead')}</p>
       <div class="row" style="margin-top:.4rem"><input type="checkbox" id="wSec" ${WSCOPE.sec?'checked':''}><label style="margin:0">${t('wizScopeSec')}</label></div>
+      <div class="row" style="margin-top:.4rem;gap:.6rem;align-items:center">
+        <label class="thin" style="margin:0">${t('winScopeTitle')}</label>
+        <select id="wWinScope" style="max-width:320px">
+          <option value="all">${t('winScopeAll')}</option>
+          <option value="security">${t('winScopeSec')}</option>
+        </select>
+      </div>
+      <p class="note">${t('winScopeNote')}</p>
       <label class="thin" style="margin-top:.7rem">${t('wizScopeApp')}</label>
       <select id="wApp"><option value="none">${t('appNone')}</option><option value="auto">${t('appAuto')}</option></select>
       <p class="note">${t('wizScopeAppNote')}</p>
@@ -1642,6 +1711,7 @@ function renderWiz(){
       <select id="wHc"><option value="none">${t('hcNone')}</option><option value="auto">${t('hcAuto')}</option></select>
       <p class="note">${t('wizScopeHcNote')}</p>`;
     el('wApp').value=WSCOPE.app;el('wHc').value=WSCOPE.hc;el('wRebMode').value=WSCOPE.rebootMode;
+    el('wWinScope').value=WSCOPE.winScope;
   }else if(WSTEP===5){
     b.innerHTML=`<p style="color:var(--ink-dim)">${t('wizNotifLead')}</p><div class="prop"><div class="note">${t('wizNotifNote')}</div></div>
       ${!PLAN||!PLAN.plan.length?`<p class="note" style="color:var(--warn)">${t('wizNoPlan')}</p>`:''}`;
@@ -1650,6 +1720,7 @@ function renderWiz(){
 async function wizFinish(){
   // capture scope choices from step 4 if present
   if(el('wSec'))WSCOPE.sec=el('wSec').checked;
+  if(el('wWinScope'))WSCOPE.winScope=el('wWinScope').value==='security'?'security':'all';
   if(el('wApp'))WSCOPE.app=el('wApp').value;
   if(el('wReboot'))WSCOPE.reboot=el('wReboot').checked;
   if(el('wRebMode'))WSCOPE.rebootMode=el('wRebMode').value;
@@ -1662,7 +1733,7 @@ async function wizFinish(){
     const g=(DATA.guests||[]).find(x=>x.vmid===it.vmid);const cur=g?g.config:{};
     await fetch('/api/guests/'+it.vmid,{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({...cur,enabled:true,mode:'calendar',times:[it.time],weekdays:[it.weekday],
-        security_patch:WSCOPE.sec,app_update:WSCOPE.app==='auto'?'auto':null,pre_snapshot:true,
+        security_patch:WSCOPE.sec,win_update_scope:WSCOPE.winScope,app_update:WSCOPE.app==='auto'?'auto':null,pre_snapshot:true,
         auto_reboot:WSCOPE.reboot,reboot_mode:WSCOPE.rebootMode,
         health_check:{type:WSCOPE.hc,arg:(cur.health_check||{}).arg||''},force:true})});
   }

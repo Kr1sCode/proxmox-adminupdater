@@ -242,13 +242,25 @@ def _win_encoded(script):
 
 
 # ---- built-in Windows Update (COM API, no external module) -------------------
-WIN_UPDATE_PS = r"""
+# Microsoft's published update-classification GUIDs: Security Updates + Critical
+# Updates -- the two classifications that matter for "security-only" on a server
+# that isn't meant to chase every feature/driver update. See
+# https://learn.microsoft.com/en-us/windows/deployment/update/windows-update-security
+_WIN_SECURITY_CRITERIA = (
+    "IsInstalled=0 and IsHidden=0 and "
+    "(CategoryIDs contains '0fa1201d-4330-4fa8-8ae9-b877473b6441' or "
+    "CategoryIDs contains 'e6cf1350-c01b-414d-a61f-263d14d133b4')"
+)
+_WIN_ALL_CRITERIA = "IsInstalled=0 and IsHidden=0"
+
+
+_WIN_UPDATE_PS_TMPL = r"""
 $ProgressPreference = 'SilentlyContinue'
 $ErrorActionPreference = 'Stop'
 try {
     $session = New-Object -ComObject Microsoft.Update.Session
     $searcher = $session.CreateUpdateSearcher()
-    $result = $searcher.Search("IsInstalled=0 and IsHidden=0")
+    $result = $searcher.Search("__CRITERIA__")
     if ($result.Updates.Count -eq 0) {
         Write-Output "brak dostepnych aktualizacji / no updates available"
         exit 0
@@ -281,6 +293,14 @@ try {
     exit 1
 }
 """
+
+
+def _win_update_ps(scope):
+    """scope: 'security' -> Security+Critical classifications only, else every
+    applicable, non-hidden update (today's default behaviour)."""
+    criteria = _WIN_SECURITY_CRITERIA if scope == "security" else _WIN_ALL_CRITERIA
+    return _WIN_UPDATE_PS_TMPL.replace("__CRITERIA__", criteria)
+
 
 WIN_REBOOT_CHECK_PS = (
     "$a = Test-Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\WindowsUpdate\\Auto Update\\RebootRequired'; "
@@ -367,7 +387,7 @@ def detect_distro(driver):
     return driver.detect_os()
 
 
-def build_security_patch(d):
+def build_security_patch(d, win_scope="all"):
     if d in ("debian", "ubuntu"):
         # Full upgrade. For security-only: install unattended-upgrades in the
         # guest and swap for ["bash","-lc","unattended-upgrade -v"].
@@ -381,7 +401,7 @@ def build_security_patch(d):
     if d in ("fedora", "rhel", "centos", "rocky", "almalinux"):
         return ["bash", "-lc", "dnf -y upgrade || yum -y update"]
     if d == "windows":
-        return _win_encoded(WIN_UPDATE_PS)
+        return _win_encoded(_win_update_ps(win_scope))
     return None
 
 
@@ -830,7 +850,7 @@ def do_job(cfg, job):
         for action in actions:
             step = {"action": action}
             if action == "security-patch":
-                cmd = build_security_patch(distro)
+                cmd = build_security_patch(distro, job.get("win_update_scope", "all"))
             elif action == "app-update":
                 cmd = build_app_update(cfg, driver, str(job.get("app", "")), distro)
             else:

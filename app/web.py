@@ -205,6 +205,8 @@ def api_guest_save(vmid):
         g["reboot_mode"] = "required"
     if g.get("offline_mode") not in ("start_stop", "start_keep"):
         g["offline_mode"] = "skip"
+    if g.get("win_update_scope") != "security":
+        g["win_update_scope"] = "all"
     # Only normalize what the caller actually sent: an untouched field stays None so
     # the guest keeps inheriting the global default (the wizard saves policy without it).
     if "ram_boost" in body:
@@ -231,7 +233,7 @@ def api_guest_save(vmid):
     core.save_config(cfg)
     _audit(f"CT {vmid} polityka zapisana: enabled={g['enabled']} mode={g['mode']} "
            f"times={g.get('times')} weekdays={g.get('weekdays')} interval={g.get('interval_minutes')} "
-           f"patch={g['security_patch']} app={g.get('app_update')} "
+           f"patch={g['security_patch']}/{g.get('win_update_scope')} app={g.get('app_update')} "
            f"reboot={g.get('auto_reboot')}/{g['reboot_mode']} offline={g['offline_mode']} "
            f"health={g.get('health_check', {}).get('type')} "
            f"ram_boost={g['ram_boost']}/{g['ram_boost_mb']}MB keep={g.get('keep')} "
@@ -242,9 +244,10 @@ def api_guest_save(vmid):
 @app.route("/api/schedule/propose")
 def api_schedule_propose():
     # optional ?vmids=102,103 -> place exactly these (wizard's include/exclude);
-    # absent -> default set (every guest with a fresh backup)
+    # PARAM ABSENT -> default set (every guest with a fresh backup); param PRESENT but
+    # empty (?vmids=, e.g. everything unticked in the wizard) -> place none, on purpose.
     raw = request.args.get("vmids")
-    vmids = [int(x) for x in raw.split(",") if x.strip().isdigit()] if raw else None
+    vmids = None if raw is None else [int(x) for x in raw.split(",") if x.strip().isdigit()]
     return jsonify(up.propose_schedule(core.load_config(), vmids))
 
 
