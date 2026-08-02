@@ -30,7 +30,15 @@
   h1,h2,h3{margin:0;font-weight:650}
 
   /* command bar */
-  .cmd{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 22px;border-bottom:1px solid var(--border-soft)}
+  .cmd{position:relative;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 22px;border-bottom:1px solid var(--border-soft)}
+  .cmdleft{display:flex;align-items:center;min-width:0}
+  /* true page-center regardless of how wide the left/right groups are, not just
+     centered-within-leftover-space (which drifts whenever the two sides differ) */
+  .cmdcenter{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+             display:flex;align-items:center;gap:12px}
+  .cmdright{display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:flex-end}
+  @media(max-width:1200px){.cmd{flex-wrap:wrap}
+    .cmdcenter{position:static;transform:none;flex-wrap:wrap;justify-content:flex-start;order:3;width:100%}}
   .brand{display:flex;align-items:center;gap:10px}
   .brand .brandtext{display:flex;flex-direction:column;gap:1px;line-height:1.15}
   .brand .logo{font-size:18px;font-weight:700}
@@ -326,22 +334,28 @@
 </head>
 <body>
 <div class="cmd">
-  <div class="brand"><span class="brandic" data-ic="shield"></span>
-    <div class="brandtext"><span class="logo">AdminUpdater</span><span class="slogan" data-i18n="brandSlogan">Safe, scheduled updates for your Proxmox fleet</span></div>
-    <span class="node mono" id="nodeName"></span></div>
-  <div class="watchwrap"><button class="watch wait" id="watch" title=""><span class="dot"></span><span id="watchTxt">API</span></button><div class="watchpop" id="watchPop"></div></div>
-  <div class="cadence" id="cadence">
-    <span class="cad" id="cadInv" title=""></span>
-    <span class="cad" id="cadCov" title=""></span>
-    <span class="cad" id="cadUi" title=""></span>
+  <div class="cmdleft">
+    <div class="brand"><span class="brandic" data-ic="shield"></span>
+      <div class="brandtext"><span class="logo">AdminUpdater</span><span class="slogan" data-i18n="brandSlogan">Safe, scheduled updates for your Proxmox fleet</span></div>
+    </div>
   </div>
-  <span id="pausewrap"></span>
-  <span class="sp"></span>
-  <button class="btn ghost" id="openWiz"><span data-ic="wand"></span> <span data-i18n="wizard">Wizard</span></button>
-  <button class="chipbtn" id="langBtn">EN&nbsp;/&nbsp;PL</button>
-  <button class="chipbtn" id="themeBtn"><span data-ic="moon"></span></button>
-  <button class="btn ghost" id="pauseBtn"></button>
-  <button class="btn ghost" id="logout"><span data-ic="logout"></span> <span data-i18n="logout">Log out</span></button>
+  <div class="cmdcenter">
+    <span class="node mono" id="nodeName"></span>
+    <div class="watchwrap"><button class="watch wait" id="watch" title=""><span class="dot"></span><span id="watchTxt">API</span></button><div class="watchpop" id="watchPop"></div></div>
+    <div class="cadence" id="cadence">
+      <span class="cad" id="cadInv" title=""></span>
+      <span class="cad" id="cadCov" title=""></span>
+      <span class="cad" id="cadUi" title=""></span>
+    </div>
+  </div>
+  <div class="cmdright">
+    <span id="pausewrap"></span>
+    <button class="btn ghost" id="openWiz"><span data-ic="wand"></span> <span data-i18n="wizard">Wizard</span></button>
+    <button class="chipbtn" id="langBtn">EN&nbsp;/&nbsp;PL</button>
+    <button class="chipbtn" id="themeBtn"><span data-ic="moon"></span></button>
+    <button class="btn ghost" id="pauseBtn"></button>
+    <button class="btn ghost" id="logout"><span data-ic="logout"></span> <span data-i18n="logout">Log out</span></button>
+  </div>
 </div>
 
 <nav>
