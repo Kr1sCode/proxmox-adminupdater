@@ -288,9 +288,13 @@
   .grow.proposed{background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 7%,transparent),transparent 55%)}
   .grow.proposed .glabel .nm::after{content:'●';color:var(--accent);font-size:9px;margin-left:6px;vertical-align:middle}
   .steps{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap}
-  .step{font-family:var(--mono);font-size:11px;padding:5px 10px;border-radius:99px;border:1px solid var(--border);color:var(--ink-mute)}
+  .step{font-family:var(--mono);font-size:11px;padding:5px 10px;border-radius:99px;border:1px solid var(--border);color:var(--ink-mute);
+        cursor:pointer;background:transparent}
+  .step:hover{border-color:var(--accent);color:var(--ink)}
   .step.on{background:var(--accent);border-color:var(--accent);color:#04121f;font-weight:650}
   .step.done{border-color:var(--good);color:var(--good)}
+  .wizx{padding:6px 9px;font-size:15px;line-height:1;color:var(--ink-dim)}
+  .wizx:hover{border-color:var(--crit);color:var(--crit)}
   .scan{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:6px 0 14px}
   .scancard{border:1px solid var(--border-soft);border-radius:var(--r-sm);padding:12px 14px;background:var(--surface-2)}
   .scancard .n{font-family:var(--mono);font-size:24px;font-weight:600}
@@ -354,12 +358,13 @@
         </div>
         <button class="chipbtn" id="wizLang"></button>
         <button class="chipbtn" id="wizTheme"><span data-ic="moon"></span></button>
+        <button class="chipbtn wizx" id="wizX" title="Esc"><span data-ic="x"></span></button>
       </div>
       <div class="steps" id="wizSteps"></div>
     </div>
     <div class="dlg-body" id="wizBody"></div>
     <div class="dlg-foot">
-      <button class="btn ghost" id="wizClose" data-i18n="wizClose">Close (finish later)</button>
+      <button class="btn ghost" id="wizClose" data-i18n="wizClose">Close</button>
       <div style="display:flex;gap:10px">
         <button class="btn ghost" id="wizBack" data-i18n="wizBack">Back</button>
         <button class="btn primary" id="wizNext"></button>
@@ -740,7 +745,7 @@ const I18N={
     rbNote:'Some app updates build from source (npm install, compiles) and run out of memory on a small container — the update fails with rc=137 (OOM) or rc=113 (under-provisioned). adminupdater raises this container’s RAM just for the update and puts it back afterwards; the Proxmox host caps the value (ram_boost_max_mb in host.conf).',
     rbMb:'Raise to at least (MB)',
     // wizard
-    wizEyebrow:'Wizard · first run',wizTitle:"Let's schedule safe updates for your fleet",wizClose:'Close (finish later)',wizBack:'Back',wizFinish:'Finish',
+    wizEyebrow:'Wizard · first run',wizTitle:"Let's schedule safe updates for your fleet",wizClose:'Close',wizBack:'Back',wizFinish:'Finish',
     st1:'1 · Scan',st2:'2 · Machines',st3:'3 · Schedule',st4:'4 · Scope + health',st5:'5 · Notifications',
     wizScanLead:'I scanned host {n}. Here is what I found:',scLxc:'machines ({a} LXC + {b} VM)',scFresh:'have a fresh backup (< {h} h)',scSnaps:'snapshots total',scNoBk:'with no backup at all — risk',
     freshHoursLbl:'Backup freshness threshold (hours)',freshHoursNote:'How old the newest independent backup (PBS/pvesm) may be before a guest counts as "no fresh copy" and auto-updates are held. The guest\'s own pre-update snapshot always runs regardless — this only gates the extra require-backup safety check. Also used when proposing a schedule.',freshHoursSaved:'Saved.',
@@ -854,7 +859,7 @@ const I18N={
     rbLbl:'Tymczasowo zwiększaj RAM na czas aktualizacji',
     rbNote:'Niektóre aktualizacje budują się ze źródeł (npm install, kompilacje) i na małym kontenerze brakuje im pamięci — aktualizacja pada z kodem rc=137 (OOM) lub rc=113 (za mało zasobów). adminupdater podnosi RAM tego kontenera tylko na czas aktualizacji i przywraca go po zakończeniu; host Proxmox ogranicza tę wartość (ram_boost_max_mb w host.conf).',
     rbMb:'Podnieś do co najmniej (MB)',
-    wizEyebrow:'Kreator · pierwsze uruchomienie',wizTitle:'Ułóżmy bezpieczne aktualizacje Twojej floty',wizClose:'Zamknij (dokończę później)',wizBack:'Wstecz',wizFinish:'Zakończ',
+    wizEyebrow:'Kreator · pierwsze uruchomienie',wizTitle:'Ułóżmy bezpieczne aktualizacje Twojej floty',wizClose:'Zamknij',wizBack:'Wstecz',wizFinish:'Zakończ',
     st1:'1 · Skan',st2:'2 · Maszyny',st3:'3 · Harmonogram',st4:'4 · Zakres + health',st5:'5 · Powiadomienia',
     wizScanLead:'Przeskanowałem hosta {n}. Oto co znalazłem:',scLxc:'maszyn ({a} LXC + {b} VM)',scFresh:'ma świeży backup (< {h} h)',scSnaps:'migawek łącznie',scNoBk:'bez żadnej kopii — ryzyko',
     freshHoursLbl:'Próg świeżości backupu (godziny)',freshHoursNote:'Jak stara może być najnowsza niezależna kopia (PBS/pvesm), zanim gość liczy się jako „brak świeżej kopii" i auto-aktualizacje są wstrzymywane. Własna migawka przed aktualizacją i tak zawsze się wykonuje — to dotyczy tylko dodatkowego zabezpieczenia require-backup. Brane pod uwagę też przy proponowaniu harmonogramu.',freshHoursSaved:'Zapisano.',
@@ -1624,6 +1629,8 @@ function closeWizard(done){
 }
 el('openWiz').onclick=openWizard;
 el('wizClose').onclick=()=>closeWizard(true);
+el('wizX').onclick=()=>closeWizard(true);
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!el('wiz').hidden)closeWizard(true);});
 el('wizBack').onclick=()=>{if(WSTEP>1){WSTEP--;renderWiz();}};
 // build the guest list the timeline renders while previewing: planned machines get
 // their PROPOSED night+time; a guest unticked on step 2 is shown as excluded (disabled)
@@ -1678,7 +1685,10 @@ el('wizNext').onclick=async()=>{
 };
 function renderWizSteps(){
   const labels=['st1','st2','st3','st4','st5'];
-  el('wizSteps').innerHTML=labels.map((k,i)=>`<span class="step ${i+1===WSTEP?'on':(i+1<WSTEP?'done':'')}">${t(k)}</span>`).join('');
+  el('wizSteps').innerHTML=labels.map((k,i)=>`<span class="step ${i+1===WSTEP?'on':(i+1<WSTEP?'done':'')}" data-step="${i+1}">${t(k)}</span>`).join('');
+  // steps are peekable: click any label to jump straight there (view-only nav, same
+  // as Back) instead of forcing Next/Back one step at a time to glance at settings.
+  el('wizSteps').querySelectorAll('.step').forEach(s=>s.onclick=()=>{WSTEP=+s.dataset.step;renderWiz();});
   el('wizBack').disabled=WSTEP===1;
   el('wizNext').textContent=[null,t('next2'),t('next3'),t('next4'),t('next5'),t('wizApplyPlan')][WSTEP];
 }
