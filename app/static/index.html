@@ -39,7 +39,8 @@
   .cmdright{display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:flex-end}
   @media(max-width:1200px){.cmd{flex-wrap:wrap}
     .cmdcenter{position:static;transform:none;flex-wrap:wrap;justify-content:flex-start;order:3;width:100%}}
-  .brand{display:flex;align-items:center;gap:10px}
+  .brand{display:flex;align-items:center;gap:10px;cursor:pointer;border-radius:var(--r-sm)}
+  .brand:hover .logo{color:var(--accent)}
   .brand .brandtext{display:flex;flex-direction:column;gap:1px;line-height:1.15}
   .brand .logo{font-size:18px;font-weight:700}
   .brand .slogan{font-size:10.5px;font-weight:500;letter-spacing:.02em;color:var(--ink-mute)}
@@ -97,9 +98,9 @@
   body.wiz-open nav .tab:not(.active){opacity:.38;pointer-events:none;cursor:not-allowed}
 
   main{flex:1;min-height:0;overflow-y:auto;padding:6px 0 40px}
-  .copyr{position:relative;flex:none;text-align:center;padding:9px 12px;font-size:11px;color:var(--ink-mute);
+  .copyr{position:relative;flex:none;text-align:center;padding:9px 12px;font-size:11px;color:var(--ink-dim);
          border-top:1px solid var(--border-soft);letter-spacing:.02em}
-  .copyr .ver{position:absolute;right:16px;top:50%;transform:translateY(-50%);font-family:var(--mono);font-size:10.5px;color:var(--ink-mute)}
+  .copyr .ver{position:absolute;right:16px;top:50%;transform:translateY(-50%);font-family:var(--mono);font-size:10.5px;font-weight:600;color:var(--ink-dim)}
   .wrap{max-width:1560px;margin:0 auto;padding:12px 28px}
   .pane{display:none}.pane.active{display:block}
 
@@ -1661,6 +1662,11 @@ function closeWizard(done){
   WIZPREVIEW=null;render();               // drop the preview, back to the real saved schedule
   startGuestsAuto();
 }
+document.querySelector('.brand').onclick=()=>{
+  if(!el('wiz').hidden)closeWizard(true);
+  document.querySelector('nav .tab[data-tab="window"]').click();
+  const mn=document.querySelector('main');if(mn)mn.scrollTop=0;
+};
 el('openWiz').onclick=openWizard;
 el('wizClose').onclick=()=>closeWizard(true);
 el('wizX').onclick=()=>closeWizard(true);
