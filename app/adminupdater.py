@@ -210,7 +210,7 @@ def compute_plan():
     if hu["enabled"]:
         last_host = state.get(HOST_KEY, {}).get("last_run", 0)
         if core.is_due(hu, last_host, now):
-            jobs.append({"kind": "host-update"})
+            jobs.append({"kind": "host-update", "scope": hu.get("scope", "safe")})
     return jobs
 
 
@@ -816,15 +816,22 @@ def propose_schedule(cfg, vmids=None):
     }
 
 # Schedule for updating the PVE host itself. The ACTUAL command lives host-side
-# in host.conf (host_update_cmd) — the panel only decides timing + enable, never
-# ships a command. Weekday default 5 = Saturday (Mon=0..Sun=6), matching the
-# typical "Sat 02:00" host cron.
+# (host.conf host_update_cmd_safe/host_update_cmd_full) — the panel only picks a
+# small enum (never ships a raw command, same boundary as security-patch/app-update
+# for guests). "safe" = apt upgrade --no-new-pkgs: never touches the kernel or pulls
+# in a new package, so it never needs a reboot -- but a new kernel build (a NEW
+# binary package, not a version bump of an existing one) is invisible to it. "full"
+# = apt full-upgrade: also picks up kernel/new packages, may need a reboot after
+# (the host is not auto-rebooted -- that's the whole hypervisor, every guest goes
+# down with it, so this stays a manual call the operator makes from the PVE UI).
+# Weekday default 5 = Saturday (Mon=0..Sun=6), matching the typical "Sat 02:00" host cron.
 HOST_UPDATE_DEFAULTS = {
     "enabled": False,
     "mode": "calendar",
     "interval_minutes": 10080,
     "times": ["02:00"],
     "weekdays": [5],
+    "scope": "safe",   # safe | full
 }
 
 

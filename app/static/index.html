@@ -570,7 +570,12 @@
       <label class="thin" data-i18n="wizHostDays">Day(s) of the host update</label><div id="hDays" class="daypick"></div>
     </div>
     <div id="hInt" style="display:none"><label data-i18n="everyMinLbl">Every N minutes</label><input type="number" id="hInterval" value="10080"></div>
-    <p class="muted" style="font-size:.8rem;margin-top:.6rem" data-i18n="hostNote">The command is defined host-side (host.conf → host_update_cmd) and needs host_update=on there.</p>
+    <label class="thin" data-i18n="wizHostScope">What to update</label>
+    <select id="hScope">
+      <option value="safe" data-i18n="hostScopeSafe">Safe (no kernel, no new packages, no reboot)</option>
+      <option value="full" data-i18n="hostScopeFull">Full (dist-upgrade, incl. kernel — may need a reboot)</option>
+    </select>
+    <p class="muted" style="font-size:.8rem;margin-top:.6rem" data-i18n="hostNote">The scope (safe / full) is picked here; the host composes the actual command from its own presets (host.conf) and needs host_update=on there.</p>
   </div>
   <div class="dlg-foot"><span></span><div style="display:flex;gap:10px"><button class="btn ghost" onclick="hdlg.close()" data-i18n="cancel">Cancel</button><button class="btn primary" id="hSave" data-i18n="save">Save</button></div></div>
 </dialog>
@@ -676,8 +681,11 @@ const I18N={
     ganttBackup:'Backup window',ganttDaily:'daily',ganttHostRow:'Host update',ganttNoSched:'not scheduled',ganttOffWindow:'outside the night window',ganttConflict:'overlaps a forbidden slot — re-run Plan schedule',
     cascadeSeqTip:'Cascade: position #N in the queue — shares this trigger time with the ones before it; the real gap between them is however long the previous one actually takes to run, not a fixed clock offset.',
     ganttSnapC:'📷 snapshot',ganttSnapP:'🗑 prune',ganttNoEnabled:'No LXC has an update schedule yet — use “Plan schedule”.',
-    wizHostTitle:'Update the PVE host itself',wizHostEnable:'Update the PVE host on a schedule',wizHostDays:'Day(s) of the host update',
-    wizHostNote:'adminupdater runs this itself on the host (apt upgrade from host.conf → host_update_cmd, needs host_update=on) — it is not a third-party script. It shows as the amber row in the service window below; on a shared night the planner keeps LXC updates clear of it.',
+    wizHostTitle:'Update the PVE host itself',wizHostEnable:'Update the PVE host on a schedule',wizHostDays:'Day(s) of the host update',wizHostScope:'What to update',
+    hostScopeSafe:'Safe (no kernel, no new packages, no reboot)',hostScopeFull:'Full (dist-upgrade, incl. kernel — may need a reboot)',
+    hostScopeSafeNote:'apt upgrade --no-new-pkgs: upgrades existing packages in place, never installs a new one. A new kernel build ships as a NEW package, so it is skipped — the host never needs a reboot from this.',
+    hostScopeFullNote:'apt full-upgrade: also picks up a new kernel build and any package that needs one installed/removed to satisfy the upgrade. Check /var/run/reboot-required afterwards and reboot the host yourself when convenient — adminupdater never reboots the hypervisor automatically.',
+    wizHostNote:'adminupdater runs this itself on the host (needs host_update=on in host.conf) — it is not a third-party script. It shows as the amber row in the service window below; on a shared night the planner keeps LXC updates clear of it.',
     kManaged:'Managed',kManagedS:'of {n} machines on host',kCurrent:'Up to date',kCurrentS:'after last run',
     kPending:'Pending',kPendingS:'scheduled soon',kProblems:'Problems',kProblemsS:'rollback / health-check',
     kUpdatesFound:'Updates found',kUpdatesFoundS:'checked {a} / {b} machines',
@@ -711,7 +719,7 @@ const I18N={
     cancel:'Cancel',save:'Save',close:'Close',
     pveHost:'PVE host',hUpdates:'updates pending',hUpToDate:'up to date',hReboot:'reboot required',hUnknown:'status unknown (waiting for host)',
     hostTitle:'PVE host update',hEnabled:'Enable scheduled host update',hLast:'last',hostUpd:'host update',
-    hostNote:'The command is defined host-side (host.conf → host_update_cmd) and needs host_update=on there.',
+    hostNote:'The scope (safe / full) is picked here; the host composes the actual command from its own presets (host.conf) and needs host_update=on there.',
     proposeBtn:'Plan schedule',bulkSnap:'Snapshot all',bulkUpd:'Update all',bulkPurge:'Purge all',
     snapNow:'Snapshot now',updNow:'Update now',purgeNow:'Purge snapshots',queued:'queued',running:'updating…',
     checkNow:'Check for updates',checkTitle:'Pending updates',checkNone:'No pending updates',
@@ -791,8 +799,11 @@ const I18N={
     ganttBackup:'Okno backupu',ganttDaily:'codziennie',ganttHostRow:'Aktualizacja hosta',ganttNoSched:'brak harmonogramu',ganttOffWindow:'poza oknem nocnym',ganttConflict:'nachodzi na strefę zakazaną — uruchom ponownie Zaplanuj harmonogram',
     cascadeSeqTip:'Kaskada: pozycja #N w kolejce — dzieli ten sam czas startu z poprzednimi; realny odstęp między nimi to tyle, ile faktycznie trwa poprzednia, nie sztywny odstęp zegarowy.',
     ganttSnapC:'📷 migawka',ganttSnapP:'🗑 prune',ganttNoEnabled:'Żaden LXC nie ma jeszcze harmonogramu — użyj „Zaplanuj harmonogram".',
-    wizHostTitle:'Aktualizacja samego hosta PVE',wizHostEnable:'Aktualizuj hosta PVE wg harmonogramu',wizHostDays:'Dzień(dni) aktualizacji hosta',
-    wizHostNote:'adminupdater robi to sam na hoście (apt upgrade z host.conf → host_update_cmd, wymaga host_update=on) — to NIE zewnętrzny skrypt. Pokazuje się jako pomarańczowy wiersz w oknie serwisowym poniżej; w tę samą noc planer trzyma aktualizacje LXC z dala od tego slotu.',
+    wizHostTitle:'Aktualizacja samego hosta PVE',wizHostEnable:'Aktualizuj hosta PVE wg harmonogramu',wizHostDays:'Dzień(dni) aktualizacji hosta',wizHostScope:'Co aktualizować',
+    hostScopeSafe:'Bezpieczny (bez jądra, bez nowych pakietów, bez restartu)',hostScopeFull:'Pełny (dist-upgrade, z jądrem — może wymagać restartu)',
+    hostScopeSafeNote:'apt upgrade --no-new-pkgs: podbija wersje istniejących pakietów, nigdy nie instaluje nowego. Nowe jądro to NOWY pakiet, więc jest pomijane — host nigdy nie wymaga restartu z tego powodu.',
+    hostScopeFullNote:'apt full-upgrade: podciąga też nowe jądro i każdy pakiet potrzebny do domknięcia aktualizacji. Sprawdź potem /var/run/reboot-required i zrestartuj hosta sam, kiedy Ci wygodnie — adminupdater nigdy nie restartuje hypervisora automatycznie.',
+    wizHostNote:'adminupdater robi to sam na hoście (wymaga host_update=on w host.conf) — to NIE zewnętrzny skrypt. Pokazuje się jako pomarańczowy wiersz w oknie serwisowym poniżej; w tę samą noc planer trzyma aktualizacje LXC z dala od tego slotu.',
     kManaged:'Zarządzane',kManagedS:'z {n} maszyn na hoście',kCurrent:'Aktualne',kCurrentS:'po ostatnim runie',
     kPending:'Oczekują',kPendingS:'zaplanowane wkrótce',kProblems:'Problemy',kProblemsS:'rollback / health-check',
     kUpdatesFound:'Znalezione aktualizacje',kUpdatesFoundS:'sprawdzono {a} / {b} maszyn',
@@ -826,7 +837,7 @@ const I18N={
     cancel:'Anuluj',save:'Zapisz',close:'Zamknij',
     pveHost:'Host PVE',hUpdates:'aktualizacji do zainstalowania',hUpToDate:'aktualny',hReboot:'wymagany restart',hUnknown:'status nieznany (czekam na hosta)',
     hostTitle:'Aktualizacja hosta PVE',hEnabled:'Włącz zaplanowaną aktualizację hosta',hLast:'ostatnio',hostUpd:'aktualizacja hosta',
-    hostNote:'Komenda jest po stronie hosta (host.conf → host_update_cmd) i wymaga host_update=on.',
+    hostNote:'Zakres (bezpieczny / pełny) wybierasz tutaj; host sam składa realną komendę ze swoich presetów (host.conf) i wymaga tam host_update=on.',
     proposeBtn:'Zaplanuj harmonogram',bulkSnap:'Migawka wszystkim',bulkUpd:'Aktualizuj wszystkie',bulkPurge:'Usuń migawki wszystkim',
     snapNow:'Migawka teraz',updNow:'Aktualizuj teraz',purgeNow:'Usuń migawki',queued:'w kolejce',running:'aktualizuję…',
     checkNow:'Sprawdź aktualizacje',checkTitle:'Zaległe aktualizacje',checkNone:'Brak zaległych aktualizacji',
@@ -1358,13 +1369,14 @@ el('bulkPurge').onclick=()=>{const v=allVmids();if(v.length&&confirm(t('confirmP
 // ---------- host update dialog ----------
 function openHost(){el('hEnabled').checked=!!HU.enabled;el('hMode').value=HU.mode||'calendar';
   el('hTime').value=(HU.times||['02:00'])[0];fillDayPick('hDays',(HU.weekdays&&HU.weekdays.length)?HU.weekdays:[5]);
-  el('hInterval').value=HU.interval_minutes||10080;toggleHostMode();el('hdlg').showModal();}
+  el('hInterval').value=HU.interval_minutes||10080;el('hScope').value=HU.scope==='full'?'full':'safe';
+  toggleHostMode();el('hdlg').showModal();}
 function toggleHostMode(){const cal=el('hMode').value==='calendar';el('hCal').style.display=cal?'':'none';el('hInt').style.display=cal?'none':'';}
 el('hMode').onchange=toggleHostMode;
 el('hSave').onclick=async()=>{
   await fetch('/api/host-update',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({enabled:el('hEnabled').checked,mode:el('hMode').value,times:[el('hTime').value.trim()],
-      weekdays:readDayPick('hDays'),
+      weekdays:readDayPick('hDays'),scope:el('hScope').value,
       interval_minutes:+el('hInterval').value||10080})});
   el('hdlg').close();load();};
 el('hostbar').onclick=openHost;
@@ -1674,7 +1686,8 @@ async function applyWizHost(){
   if(!el('wHostEn'))return;
   const body={enabled:el('wHostEn').checked,mode:'calendar',
     times:[el('wHostTime').value.trim()||'02:00'],
-    weekdays:(readDayPick('wHostDays').length?readDayPick('wHostDays'):[5]),interval_minutes:10080};
+    weekdays:(readDayPick('wHostDays').length?readDayPick('wHostDays'):[5]),interval_minutes:10080,
+    scope:(el('wHostScope')?el('wHostScope').value:'safe')};
   HU=body;
   await fetch('/api/host-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 }
@@ -1765,6 +1778,12 @@ function renderWiz(){
         <div class="row" style="margin-top:.2rem;justify-content:flex-start"><input type="checkbox" id="wHostEn"><label style="margin:0">${t('wizHostEnable')}</label></div>
         <label class="thin">${t('timeLbl')}</label><input type="text" id="wHostTime" style="max-width:160px">
         <label class="thin">${t('wizHostDays')}</label><div id="wHostDays" class="daypick"></div>
+        <label class="thin">${t('wizHostScope')}</label>
+        <select id="wHostScope" style="max-width:260px">
+          <option value="safe">${t('hostScopeSafe')}</option>
+          <option value="full">${t('hostScopeFull')}</option>
+        </select>
+        <p class="note" id="wHostScopeNote" style="margin-bottom:0"></p>
         <p class="note" style="margin-bottom:0">${t('wizHostNote')}</p>
       </div>
       <label style="margin-top:.8rem">${t('wizLxcWindow')}</label>
@@ -1784,6 +1803,10 @@ function renderWiz(){
     el('wHostEn').checked=!!HU.enabled;
     el('wHostTime').value=(HU.times||['02:00'])[0];
     fillDayPick('wHostDays',(HU.weekdays&&HU.weekdays.length)?HU.weekdays:[5]);
+    el('wHostScope').value=HU.scope==='full'?'full':'safe';
+    const refreshScopeNote=()=>{el('wHostScopeNote').textContent=el('wHostScope').value==='full'?t('hostScopeFullNote'):t('hostScopeSafeNote');};
+    refreshScopeNote();
+    el('wHostScope').onchange=()=>{refreshScopeNote();applyWizHost();};
     fillDayPick('wDays',(DATA.maintenance||{}).days||[6]);
     el('wSpaceMode').value=(DATA.maintenance||{}).spacing_mode==='cascade'?'cascade':'fixed';
     const toggleWSpaceMode=()=>{const casc=el('wSpaceMode').value==='cascade';

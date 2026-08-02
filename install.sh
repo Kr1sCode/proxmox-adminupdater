@@ -307,10 +307,16 @@ tls_insecure   = false
 # (czyta /etc/pve/notifications.cfg + hasło z /etc/pve/priv/). notify_on: always|errors|never
 notify_via     = pve
 notify_on      = errors
-# Aktualizacja samego hosta PVE (druga bramka: domyślnie off). Komenda po stronie hosta.
-host_update      = off
-host_update_cmd  = apt update && apt --yes --no-new-pkgs upgrade
-host_update_log  = /var/log/proxmox-apt-upgrade.log
+# Aktualizacja samego hosta PVE (druga bramka: domyślnie off). Panel wybiera tylko
+# zakres (safe|full) w UI -- host sam składa realną komendę z presetów niżej (ta
+# sama zasada co security-patch/app-update: żadnej surowej komendy przez sieć).
+# host_update_mode=custom -> zawsze host_update_cmd, ignoruje wybór z panelu.
+host_update       = off
+host_update_mode  = scope
+host_update_cmd_safe = apt update && apt --yes --no-new-pkgs upgrade
+host_update_cmd_full = apt update && apt --yes full-upgrade
+host_update_cmd   = apt update && apt --yes --no-new-pkgs upgrade
+host_update_log   = /var/log/proxmox-apt-upgrade.log
 EOF
   chmod 600 /etc/proxmox-adminupdater/host.conf
 else

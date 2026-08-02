@@ -332,10 +332,13 @@ def api_host_update():
     for k in up.HOST_UPDATE_DEFAULTS:
         if k in body:
             hu[k] = body[k]
+    if hu.get("scope") not in ("safe", "full"):
+        hu["scope"] = "safe"
     cfg["host_update"] = hu
     core.save_config(cfg)
     _audit(f"aktualizacja hosta: enabled={hu['enabled']} mode={hu['mode']} "
-           f"times={hu.get('times')} weekdays={hu.get('weekdays')} interval={hu.get('interval_minutes')}")
+           f"times={hu.get('times')} weekdays={hu.get('weekdays')} interval={hu.get('interval_minutes')} "
+           f"scope={hu.get('scope')}")
     return jsonify({"ok": True, "host_update": hu})
 
 

@@ -54,10 +54,20 @@ def load_cfg():
         "notify_on": g.get("notify_on", "errors").strip().lower(),   # always | errors | never
         "notify_via": g.get("notify_via", "pve").strip().lower(),    # pve | sendmail
         "notify_from": g.get("notify_from", "adminupdater@" + os.uname().nodename).strip(),
-        # PVE host self-update (defence in depth: must be enabled host-side too)
+        # PVE host self-update (defence in depth: must be enabled host-side too).
+        # host_update_mode="scope" (default): the plan may only pick a small enum
+        # (safe|full), the host composes the real command from ITS OWN preset below --
+        # same "no raw command over the network" boundary as security-patch/app-update.
+        # host_update_mode="custom": always run host_update_cmd verbatim, ignore
+        # whatever scope the plan asked for -- the admin's explicit escape hatch for a
+        # bespoke script, unreachable from a compromised LXC either way.
         "host_update": g.getboolean("host_update", False),
-        "host_update_cmd": g.get("host_update_cmd",
-                                 "apt update && apt --yes --no-new-pkgs upgrade"),
+        "host_update_mode": g.get("host_update_mode", "scope").strip().lower(),
+        "host_update_cmd_safe": g.get("host_update_cmd_safe",
+                                      "apt update && apt --yes --no-new-pkgs upgrade"),
+        "host_update_cmd_full": g.get("host_update_cmd_full",
+                                      "apt update && apt --yes full-upgrade"),
+        "host_update_cmd": g.get("host_update_cmd", ""),   # only used when mode=custom
         "host_update_log": g.get("host_update_log", "/var/log/proxmox-apt-upgrade.log"),
         # Ceiling for the temporary app-update RAM boost. The panel picks the target,
         # the HOST caps it here — a compromised LXC can never set an absurd limit on a
@@ -680,18 +690,25 @@ def _rollback_verdict(snap, job, driver, timeout):
     return "failed"
 
 
-def do_host_update(cfg):
-    """Update the PVE host itself. The command comes from host.conf (host-trusted),
-    never from the plan. Gated by host_update=on (a compromised LXC can request it
-    but the host still refuses unless opted in). No snapshot — it's the hypervisor."""
+def do_host_update(cfg, job):
+    """Update the PVE host itself. In the default mode the plan only carries a
+    scope enum (safe|full) -- the host still composes the real command from its
+    own presets, never runs raw text from the network. Gated by host_update=on
+    (a compromised LXC can request it but the host still refuses unless opted
+    in). No snapshot — it's the hypervisor."""
     res = {"kind": "host-update", "ts": datetime.now(timezone.utc).isoformat(),
            "snapshot": None, "steps": [], "pruned": [], "reboot": False}
     if not cfg.get("host_update"):
         return {**res, "status": "rejected",
                 "steps": [{"action": "host-update", "status": "rejected", "rc": -1,
                            "log": "host_update wyłączony w host.conf"}]}
+    if cfg.get("host_update_mode") == "custom":
+        cmd = cfg["host_update_cmd"]
+    else:
+        scope = job.get("scope") if job.get("scope") in ("safe", "full") else "safe"
+        cmd = cfg["host_update_cmd_full"] if scope == "full" else cfg["host_update_cmd_safe"]
     log = cfg["host_update_log"]
-    full = f"({cfg['host_update_cmd']}) >> {shlex.quote(log)} 2>&1"
+    full = f"({cmd}) >> {shlex.quote(log)} 2>&1"
     rc, out = run(["bash", "-lc", full], cfg["timeout"])
     res["reboot"] = os.path.exists("/var/run/reboot-required")
     res["steps"].append({"action": "host-update", "status": ("ok" if rc == 0 else "failed"),
@@ -703,7 +720,7 @@ def do_host_update(cfg):
 def do_job(cfg, job):
     kind = job.get("kind", "update")
     if kind == "host-update":
-        return do_host_update(cfg)
+        return do_host_update(cfg, job)
     ctid = int(job["ctid"])
     prefix = job.get("snapshot_prefix", "preupd")
     res = {"ctid": ctid, "kind": kind, "ts": datetime.now(timezone.utc).isoformat(),
