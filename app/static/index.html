@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>adminupdater</title>
+<title>AdminUpdater — Proxmox fleet updates</title>
 <style>
   :root{
     --bg:#0a0f1a;--surface:#0f1826;--surface-2:#14203450;--raise:#16233a;
@@ -31,8 +31,10 @@
 
   /* command bar */
   .cmd{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 22px;border-bottom:1px solid var(--border-soft)}
-  .brand{display:flex;align-items:baseline;gap:10px}
+  .brand{display:flex;align-items:center;gap:10px}
+  .brand .brandtext{display:flex;flex-direction:column;gap:1px;line-height:1.15}
   .brand .logo{font-size:18px;font-weight:700}
+  .brand .slogan{font-size:10.5px;font-weight:500;letter-spacing:.02em;color:var(--ink-mute)}
   .brand .node{font-family:var(--mono);font-size:12px;color:var(--ink-dim);padding:3px 8px;border:1px solid var(--border);border-radius:99px}
   /* watchdog — live PVE-API + executor heartbeat pill */
   .watchwrap{position:relative}
@@ -87,8 +89,9 @@
   body.wiz-open nav .tab:not(.active){opacity:.38;pointer-events:none;cursor:not-allowed}
 
   main{flex:1;min-height:0;overflow-y:auto;padding:6px 0 40px}
-  .copyr{flex:none;text-align:center;padding:9px 12px;font-size:11px;color:var(--ink-mute);
+  .copyr{position:relative;flex:none;text-align:center;padding:9px 12px;font-size:11px;color:var(--ink-mute);
          border-top:1px solid var(--border-soft);letter-spacing:.02em}
+  .copyr .ver{position:absolute;right:16px;top:50%;transform:translateY(-50%);font-family:var(--mono);font-size:10.5px;color:var(--ink-mute)}
   .wrap{max-width:1560px;margin:0 auto;padding:12px 28px}
   .pane{display:none}.pane.active{display:block}
 
@@ -323,7 +326,9 @@
 </head>
 <body>
 <div class="cmd">
-  <div class="brand"><span class="logo"><span class="brandic" data-ic="shield"></span> adminupdater</span><span class="node mono" id="nodeName"></span></div>
+  <div class="brand"><span class="brandic" data-ic="shield"></span>
+    <div class="brandtext"><span class="logo">AdminUpdater</span><span class="slogan" data-i18n="brandSlogan">Safe, scheduled updates for your Proxmox fleet</span></div>
+    <span class="node mono" id="nodeName"></span></div>
   <div class="watchwrap"><button class="watch wait" id="watch" title=""><span class="dot"></span><span id="watchTxt">API</span></button><div class="watchpop" id="watchPop"></div></div>
   <div class="cadence" id="cadence">
     <span class="cad" id="cadInv" title=""></span>
@@ -472,7 +477,7 @@
   </section>
 </div>
 </main>
-<footer class="copyr">© 2026 www.krzysztofgawkowski.pl — Wszystkie prawa zastrzeżone</footer>
+<footer class="copyr">© 2026 www.krzysztofgawkowski.pl — Wszystkie prawa zastrzeżone<span class="ver" id="appVer"></span></footer>
 
 <!-- edit guest -->
 <dialog id="dlg">
@@ -666,6 +671,7 @@ const I18N={
     cadUiTip:'Dashboard auto-refresh — every 5 s (60 s while the wizard is open)',
     containers:'Containers',log:'Log',logout:'Log out',pause:'Pause',resume:'Resume',pauseTag:'PAUSED',linesLbl:'lines',
     logFilterPh:'filter text…',logCatAll:'All events',logCatAudit:'Audit (changes)',logCatTask:'Tasks',logCatError:'Errors / rollback',logCsv:'Export CSV',
+    brandSlogan:'Safe, scheduled updates for your Proxmox fleet',
     wizard:'Settings',themeWord:'Theme',change:'Change',
     thId:'ID',thType:'Type',thName:'Machine',thSystem:'System',thBackup:'Backup',thSnaps:'Snapshots',thSchedule:'Schedule',thScope:'Scope + health',thLast:'Last',
     edit:'Edit',disabled:'disabled',allDays:'daily',paused:'paused',
@@ -784,6 +790,7 @@ const I18N={
     cadUiTip:'Auto-odświeżanie panelu — co 5 s (60 s w kreatorze)',
     containers:'Kontenery',log:'Log',logout:'Wyloguj',pause:'Pauza',resume:'Wznów',pauseTag:'PAUZA',linesLbl:'linii',
     logFilterPh:'filtruj tekst…',logCatAll:'Wszystkie zdarzenia',logCatAudit:'Audyt (zmiany)',logCatTask:'Zadania',logCatError:'Błędy / rollback',logCsv:'Eksport CSV',
+    brandSlogan:'Bezpieczne, zaplanowane aktualizacje Twojej floty Proxmox',
     wizard:'Ustawienia',themeWord:'Motyw',change:'Zmień',
     thId:'ID',thType:'Typ',thName:'Maszyna',thSystem:'System',thBackup:'Backup',thSnaps:'Migawki',thSchedule:'Harmonogram',thScope:'Zakres + health',thLast:'Ostatnio',
     edit:'Edytuj',disabled:'wyłączony',allDays:'codz.',paused:'pauza',
@@ -893,6 +900,7 @@ const I18N={
     wizApplyDone:'Gotowe — harmonogram + polityka zastosowane. Witaj na pokładzie.',wizApplyPlan:'Zastosuj i zakończ',wizNoPlan:'Najpierw zaproponuj harmonogram (krok 3).',
     yes:'tak',no:'nie'}
 };
+const APP_VERSION='2026.08.02';
 let LANG=localStorage.getItem('au_lang')||'en';
 const t=(k,vars)=>{let s=(I18N[LANG]&&I18N[LANG][k])||I18N.en[k]||k;if(vars)for(const v in vars)s=s.replace('{'+v+'}',vars[v]);return s;};
 function applyLang(l){
@@ -1891,6 +1899,7 @@ async function wizFinish(){
 }
 
 // ---------- boot ----------
+el('appVer').textContent='AdminUpdater '+APP_VERSION;
 bootIcons();
 applyLang(LANG);
 load().then(()=>{if(!localStorage.getItem('au_wizard_done'))openWizard();});
