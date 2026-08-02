@@ -737,6 +737,7 @@ const I18N={
     wizEyebrow:'Wizard · first run',wizTitle:"Let's schedule safe updates for your fleet",wizClose:'Close (finish later)',wizBack:'Back',wizFinish:'Finish',
     st1:'1 · Scan',st2:'2 · Machines',st3:'3 · Schedule',st4:'4 · Scope + health',st5:'5 · Notifications',
     wizScanLead:'I scanned host {n}. Here is what I found:',scLxc:'machines ({a} LXC + {b} VM)',scFresh:'have a fresh backup (< {h} h)',scSnaps:'snapshots total',scNoBk:'with no backup at all — risk',
+    freshHoursLbl:'Backup freshness threshold (hours)',freshHoursNote:'How old the newest independent backup (PBS/pvesm) may be before a guest counts as "no fresh copy" and auto-updates are held. The guest\'s own pre-update snapshot always runs regardless — this only gates the extra require-backup safety check. Also used when proposing a schedule.',freshHoursSaved:'Saved.',
     scVmTitle:'Virtual machines found',scVmAgentOk:'agent OK',scVmAgentNone:'no agent',scVmAgentOff:'powered off',
     wizWinFound:'Detected backup window {w}',wizWinFoundN:'Detected {n} backup window(s) — avoiding all of them',wizAvoiding:'avoiding this window',wizWinNone:'No backup job detected yet — the host learns windows from real backups.',
     wizNoBkList:'No backup — kept out of auto-update',wizNoBkNote:"I won't auto-update machines without a copy. You can enable them consciously.",
@@ -850,6 +851,7 @@ const I18N={
     wizEyebrow:'Kreator · pierwsze uruchomienie',wizTitle:'Ułóżmy bezpieczne aktualizacje Twojej floty',wizClose:'Zamknij (dokończę później)',wizBack:'Wstecz',wizFinish:'Zakończ',
     st1:'1 · Skan',st2:'2 · Maszyny',st3:'3 · Harmonogram',st4:'4 · Zakres + health',st5:'5 · Powiadomienia',
     wizScanLead:'Przeskanowałem hosta {n}. Oto co znalazłem:',scLxc:'maszyn ({a} LXC + {b} VM)',scFresh:'ma świeży backup (< {h} h)',scSnaps:'migawek łącznie',scNoBk:'bez żadnej kopii — ryzyko',
+    freshHoursLbl:'Próg świeżości backupu (godziny)',freshHoursNote:'Jak stara może być najnowsza niezależna kopia (PBS/pvesm), zanim gość liczy się jako „brak świeżej kopii" i auto-aktualizacje są wstrzymywane. Własna migawka przed aktualizacją i tak zawsze się wykonuje — to dotyczy tylko dodatkowego zabezpieczenia require-backup. Brane pod uwagę też przy proponowaniu harmonogramu.',freshHoursSaved:'Zapisano.',
     scVmTitle:'Znalezione maszyny wirtualne',scVmAgentOk:'agent OK',scVmAgentNone:'brak agenta',scVmAgentOff:'wyłączona',
     wizWinFound:'Wykryto okno backupu {w}',wizWinFoundN:'Wykryto {n} okien backupu — omijam wszystkie',wizAvoiding:'omijam to okno',wizWinNone:'Nie wykryto jeszcze zadania backupu — host uczy się okien z realnych kopii.',
     wizNoBkList:'Brak backupu — pomijam z auto-update',wizNoBkNote:'Nie planuję automatycznych aktualizacji maszyn bez kopii. Możesz włączyć świadomie.',
@@ -1077,8 +1079,12 @@ function renderGantt(d){
 
   // --- anchor row 2: the host update ---
   html+=`<div class="grow ref"><div class="glabel"><span class="nm">${ic('shield','warn')} ${t('ganttHostRow')}</span><span class="day">${hostM!=null?wdList(HU.weekdays||[]):t('ganttNoSched')}</span></div>`+
-    track((hostM!=null&&inAxis(hostM))?`<div class="gbar hostu" style="left:${ribPct(hostM)}%;width:${Math.max(6,mPct(30))}%">${fmtMin(hostM)}</div>`
-            :`<span class="gempty">${t('ganttNoSched')}</span>`)+`</div>`;
+    track((hostM==null||!hostToday)?`<span class="gempty">${t('ganttNoSched')}</span>`
+            :inAxis(hostM)?`<div class="gbar hostu" style="left:${ribPct(hostM)}%;width:${Math.max(6,mPct(30))}%">${fmtMin(hostM)}</div>`
+            // configured for tonight but its clock time falls outside the rendered
+            // 21:00-08:00 axis (e.g. a morning apt upgrade) -- say so instead of
+            // claiming it's unscheduled, mirroring how LXC rows flag this case.
+            :`<span class="gempty" style="color:var(--warn)">${ic('alert','warn')} ${fmtMin(hostM)} — ${t('ganttOffWindow')}</span>`)+`</div>`;
 
   // --- host maintenance rows (read-only) — other scheduled disk-IO on the host ---
   const hj=((inv.host_jobs&&inv.host_jobs.jobs)||[]).filter(j=>j.start_min!=null&&inAxis(j.start_min)&&(j.wd==null||j.wd===GDAY))
@@ -1684,7 +1690,7 @@ function renderWiz(){
   const total=g.length,fresh=g.filter(x=>x.backup&&x.backup.fresh).length;
   const noBk=g.filter(x=>!(x.backup&&x.backup.info));
   const snapsTotal=g.reduce((s,x)=>s+(x.snapshots||0),0);
-  const freshH=SET.backup_fresh_hours||24;
+  const freshH=SET.backup_fresh_hours||72;
   const node=(DATA.host&&DATA.host.pve)?DATA.host.pve:'PVE';
   const vms=g.filter(x=>x.gtype==='qemu'),lxcN=total-vms.length;
   if(WSTEP===1){
@@ -1707,7 +1713,21 @@ function renderWiz(){
         <div class="note">${t('ribbonHint').replace(/^—\s*/,'')}</div></div>`
       :`<div class="prop"><div class="note">${t('wizWinNone')}</div></div>`}
       ${noBk.length?`<div class="prop"><div class="row"><b>${noBk.map(x=>x.name+' ('+x.vmid+')').join(', ')}</b><span class="toggle" style="color:var(--warn);background:var(--warn-bg)">${t('wizNoBkList')}</span></div><div class="note">${t('wizNoBkNote')}</div></div>`:''}
+      <div class="prop"><div class="row" style="justify-content:flex-start;gap:.6rem;align-items:center;flex-wrap:wrap">
+        <label class="thin" style="margin:0" for="wFreshH">${t('freshHoursLbl')}</label>
+        <input type="number" id="wFreshH" min="1" max="168" value="${freshH}" style="max-width:100px">
+        <button class="btn ghost" id="wFreshSave">${t('save')}</button>
+        <span id="wFreshMsg" class="muted" style="font-size:.8rem"></span>
+      </div><div class="note">${t('freshHoursNote')}</div></div>
       ${hostJobsBlock(inv)}`;
+    el('wFreshSave').onclick=async()=>{
+      const h=Math.max(1,Math.min(168,parseInt(el('wFreshH').value,10)||72));
+      el('wFreshH').value=h;
+      await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({backup_fresh_hours:h})});
+      SET.backup_fresh_hours=h;
+      el('wFreshMsg').textContent=t('freshHoursSaved');
+      await load();
+    };
   }else if(WSTEP===2){
     if(WSEL===null)WSEL=new Set(g.map(x=>x.vmid));   // default: ALL enrolled — untick to exclude
     const rows=g.map(x=>{const bk=x.backup||{};const st=bk.info?(bk.fresh?`<span class="chip good">${t('fresh')}</span>`:`<span class="chip warn">${t('stale')}</span>`):`<span class="chip crit">${t('none')}</span>`;

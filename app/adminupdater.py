@@ -151,9 +151,12 @@ def compute_plan():
         # (security patches, then app recipe, then health-check) under one
         # rollback point. Its own clock: last_run.
         due = g["enabled"] and core.is_due(g, st.get("last_run", 0), now)
-        # GUARD 2: don't auto-update a guest without a fresh backup.
+        # GUARD 2: don't auto-update a guest without a fresh backup. Default window is
+        # 72h, not 24h: a backup job that skips weekends (common for a Mon-Fri PBS job)
+        # can legitimately leave a guest's newest copy 2-3 days old without anything
+        # actually being broken. User-tunable via Settings -> backup_fresh_hours.
         no_backup = (due and sett.get("require_backup", True)
-                     and not guest_backup_fresh(vmid, inv, int(sett.get("backup_fresh_hours", 24)), now))
+                     and not guest_backup_fresh(vmid, inv, int(sett.get("backup_fresh_hours", 72)), now))
         if no_backup:
             core.log(f"guest {vmid}: brak świeżej kopii — auto-update wstrzymany (require_backup)")
         if due and not no_backup:
@@ -715,7 +718,7 @@ def propose_schedule(cfg, vmids=None):
 
     if vmids is None:  # default: every LXC with a fresh backup
         now = int(time.time())
-        fh = int(cfg["settings"].get("backup_fresh_hours", 24))
+        fh = int(cfg["settings"].get("backup_fresh_hours", 72))
         vmids = sorted((v for v in names if guest_backup_fresh(v, inv, fh, now)), key=int)
     vmids = [str(v) for v in vmids]
     state = core.load_state()
@@ -904,7 +907,7 @@ def guest_view():
         pve_ok = False
         idx = {vid: {"type": g.get("type", "lxc"), "node": "?", "name": g.get("name", ""), "status": "?"}
                for vid, g in (inv.get("guests") or {}).items()}
-    fresh_h = int(sett.get("backup_fresh_hours", 24))
+    fresh_h = int(sett.get("backup_fresh_hours", 72))
     out = []
     for vmid, meta in sorted(idx.items(), key=lambda kv: int(kv[0])):
         st = state.get(vmid, {})

@@ -299,7 +299,8 @@ def api_settings():
     body = request.get_json(force=True) or {}
     cfg = core.load_config()
     for k in ("paused", "snapshot_prefix", "rollback_on_fail",
-              "default_keep", "default_max_age_days", "ram_boost", "ram_boost_mb"):
+              "default_keep", "default_max_age_days", "ram_boost", "ram_boost_mb",
+              "require_backup", "backup_fresh_hours"):
         if k in body:
             cfg["settings"][k] = body[k]
     if "ram_boost" in cfg["settings"]:
@@ -309,6 +310,13 @@ def api_settings():
             cfg["settings"]["ram_boost_mb"] = max(512, min(int(cfg["settings"]["ram_boost_mb"]), 65536))
         except (TypeError, ValueError):
             cfg["settings"]["ram_boost_mb"] = 4096
+    if "require_backup" in cfg["settings"]:
+        cfg["settings"]["require_backup"] = bool(cfg["settings"]["require_backup"])
+    if "backup_fresh_hours" in cfg["settings"]:
+        try:                                  # a week's worth of slack tops out most reasonable cadences
+            cfg["settings"]["backup_fresh_hours"] = max(1, min(int(cfg["settings"]["backup_fresh_hours"]), 168))
+        except (TypeError, ValueError):
+            cfg["settings"]["backup_fresh_hours"] = 72
     core.save_config(cfg)
     _audit("ustawienia globalne: " + ", ".join(f"{k}={cfg['settings'].get(k)}" for k in body
                                                if k in cfg["settings"]))
