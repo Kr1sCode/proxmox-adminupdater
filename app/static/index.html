@@ -196,9 +196,11 @@
   .panel{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--r);overflow:hidden}
   .toolbar{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
   table{width:100%;border-collapse:collapse}
-  thead th{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-mute);
-           text-align:left;padding:11px 14px;border-bottom:1px solid var(--border)}
-  td{padding:11px 14px;border-bottom:1px solid var(--border-soft);vertical-align:middle;transition:background .12s ease}
+  thead th{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-dim);
+           text-align:left;padding:12px 14px;border-bottom:1px solid var(--border)}
+  th.thid{width:60px}
+  th.thtype{width:64px}
+  td{padding:13px 14px;border-bottom:1px solid var(--border-soft);vertical-align:middle;transition:background .12s ease;font-size:14px}
   tbody tr:last-child td{border-bottom:0}
   /* hover: a subtle accent-tinted wash that keeps the chip colours legible, plus a
      left accent marker — never a flat grey that swallows the row's semantics */
@@ -209,19 +211,23 @@
   tr.rowwarn td{background:var(--warn-bg)}
   tr.rowwarn td:first-child{box-shadow:inset 3px 0 0 var(--warn)}
   tr.rowwarn:hover td{background:color-mix(in srgb,var(--warn) 16%,var(--warn-bg))}
+  .vmidcell{font-family:var(--mono);white-space:nowrap}
+  .vmidnum{font-weight:700;font-size:14px;color:var(--ink)}
+  .typechip{font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.03em;
+        display:inline-block;text-align:center;min-width:38px;padding:3px 6px;border-radius:6px;border:1px solid var(--border)}
+  .typechip.lxc{color:var(--ink-dim)}
+  .typechip.vm{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,var(--border));background:color-mix(in srgb,var(--accent) 12%,transparent)}
   .gname{display:flex;align-items:baseline;gap:9px}
-  .gname .nm{font-weight:600}
-  .gname .id{font-family:var(--mono);font-size:11px;color:var(--ink-mute)}
-  .gname .vmtag{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.03em;
-        color:var(--ink-dim);border:1px solid var(--border);border-radius:4px;padding:0 4px}
-  .os{font-family:var(--mono);font-size:11px;color:var(--ink-dim)}
-  .chip{font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:99px;border:1px solid var(--border);
+  .gname .nm{font-weight:700;font-size:14.5px}
+  .os{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--ink-dim)}
+  .chip{font-family:var(--mono);font-size:11.5px;font-weight:700;padding:3px 8px;border-radius:99px;border:1px solid var(--border);
         display:inline-flex;gap:6px;align-items:center;white-space:nowrap}
   .chip.good{color:var(--good);border-color:transparent;background:var(--good-bg)}
   .chip.warn{color:var(--warn);border-color:transparent;background:var(--warn-bg)}
   .chip.crit{color:var(--crit);border-color:transparent;background:var(--crit-bg)}
   .chip.idle{color:var(--ink-dim)}
-  .snaps{font-family:var(--mono);font-size:12px;color:var(--ink-dim)}
+  .snaps{font-family:var(--mono);font-size:12.5px;font-weight:600;color:var(--ink-dim)}
+  .schedtxt{font-size:13px;font-weight:700}
   .spin{width:13px;height:13px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;
         display:inline-block;animation:sp .8s linear infinite;vertical-align:-2px}
   @keyframes sp{to{transform:rotate(360deg)}}
@@ -402,7 +408,7 @@
     <div class="panel">
       <table>
         <thead><tr>
-          <th data-i18n="thName">Machine</th><th data-i18n="thSystem">System</th><th data-i18n="thBackup">Backup</th>
+          <th class="thid" data-i18n="thId">ID</th><th class="thtype" data-i18n="thType">Type</th><th data-i18n="thName">Machine</th><th data-i18n="thSystem">System</th><th data-i18n="thBackup">Backup</th>
           <th data-i18n="thSnaps">Snapshots</th><th data-i18n="thSchedule">Schedule</th>
           <th data-i18n="thScope">Scope + health</th><th data-i18n="thLast">Last</th><th></th>
         </tr></thead>
@@ -651,7 +657,7 @@ const I18N={
     containers:'Containers',log:'Log',logout:'Log out',pause:'Pause',resume:'Resume',pauseTag:'PAUSED',linesLbl:'lines',
     logFilterPh:'filter text…',logCatAll:'All events',logCatAudit:'Audit (changes)',logCatTask:'Tasks',logCatError:'Errors / rollback',logCsv:'Export CSV',
     wizard:'Settings',themeWord:'Theme',change:'Change',
-    thName:'Machine',thSystem:'System',thBackup:'Backup',thSnaps:'Snapshots',thSchedule:'Schedule',thScope:'Scope + health',thLast:'Last',
+    thId:'ID',thType:'Type',thName:'Machine',thSystem:'System',thBackup:'Backup',thSnaps:'Snapshots',thSchedule:'Schedule',thScope:'Scope + health',thLast:'Last',
     edit:'Edit',disabled:'disabled',allDays:'daily',paused:'paused',
     refresh:'Refresh',autoLbl:'auto (5 s)',logMeta:'last 200 lines',empty:'(empty)',
     ribbonTitle:'Service window',ribbonHint:'— backup windows (red) and the host update (amber) are fixed; LXC updates are laid out around them',
@@ -766,7 +772,7 @@ const I18N={
     containers:'Kontenery',log:'Log',logout:'Wyloguj',pause:'Pauza',resume:'Wznów',pauseTag:'PAUZA',linesLbl:'linii',
     logFilterPh:'filtruj tekst…',logCatAll:'Wszystkie zdarzenia',logCatAudit:'Audyt (zmiany)',logCatTask:'Zadania',logCatError:'Błędy / rollback',logCsv:'Eksport CSV',
     wizard:'Ustawienia',themeWord:'Motyw',change:'Zmień',
-    thName:'Maszyna',thSystem:'System',thBackup:'Backup',thSnaps:'Migawki',thSchedule:'Harmonogram',thScope:'Zakres + health',thLast:'Ostatnio',
+    thId:'ID',thType:'Typ',thName:'Maszyna',thSystem:'System',thBackup:'Backup',thSnaps:'Migawki',thSchedule:'Harmonogram',thScope:'Zakres + health',thLast:'Ostatnio',
     edit:'Edytuj',disabled:'wyłączony',allDays:'codz.',paused:'pauza',
     refresh:'Odśwież',autoLbl:'auto (5 s)',logMeta:'ostatnie 200 linii',empty:'(pusto)',
     ribbonTitle:'Okno serwisowe',ribbonHint:'— okna backupu (czerwone) i aktualizacja hosta (pomarańczowa) są stałe; aktualizacje LXC układane są wokół nich',
@@ -1204,11 +1210,13 @@ function render(){
     const tr=document.createElement('tr');tr.dataset.vmid=g.vmid;
     if(noAgent||g.blocked_no_backup||(r&&r.status!=='ok'))tr.className='rowwarn';
     tr.innerHTML=`
-      <td><div class="gname"><span class="nm">${g.name||''}</span><span class="id">${g.vmid}</span>${g.gtype==='qemu'?`<span class="vmtag">VM</span>`:''}</div></td>
+      <td class="vmidcell"><span class="vmidnum">${g.vmid}</span></td>
+      <td><span class="typechip ${g.gtype==='qemu'?'vm':'lxc'}">${g.gtype==='qemu'?'VM':'LXC'}</span></td>
+      <td><div class="gname"><span class="nm">${g.name||''}</span></div></td>
       <td><span class="os">${osIcon(g.os)} ${g.os||('<span class="muted">'+g.status+'</span>')}</span></td>
       <td>${backupChip(g)}</td>
       <td><span class="snaps">${ret}</span></td>
-      <td>${c.enabled?`<span class="mono">${sched}</span>`:`<span class="muted">${t('disabled')}</span>`}</td>
+      <td>${c.enabled?`<span class="mono schedtxt">${sched}</span>`:`<span class="muted">${t('disabled')}</span>`}</td>
       <td><span class="chip idle">${scope}</span> ${hcChip} ${rebootChip}</td>
       <td>${last}</td>
       <td class="acts">

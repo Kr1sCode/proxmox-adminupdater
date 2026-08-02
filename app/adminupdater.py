@@ -142,6 +142,22 @@ def compute_plan():
             core.log(f"tick: okno backupu aktywne ({win.get('job')}) — odkładam wszystkie zadania")
             return []
 
+    # GUARD 0: a guest deleted straight from Proxmox (never through this panel) leaves
+    # its saved policy behind forever -- invisible in guest_view() (which only lists
+    # what's CURRENTLY in PVE) but still iterated here every tick, so it just spams the
+    # log with "no fresh backup" for a guest that no longer exists. inv["guests"] is
+    # rebuilt from live pct/qm list each scan (scan_ok() already guards against a bad
+    # scan clobbering it), so an empty/absent inventory means "not scanned yet" (don't
+    # prune blind) while a populated one missing a vmid means "genuinely gone".
+    known = inv.get("guests") or {}
+    if known:
+        gone = [v for v in cfg.get("guests", {}) if str(v) not in known]
+        for v in gone:
+            core.log(f"guest {v}: nie istnieje już na hoście — usuwam zapisaną politykę")
+            del cfg["guests"][v]
+        if gone:
+            core.save_config(cfg)
+
     jobs = []
     for vmid in cfg.get("guests", {}):
         g = guest_settings(cfg, vmid)
