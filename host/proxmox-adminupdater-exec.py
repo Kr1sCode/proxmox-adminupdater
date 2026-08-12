@@ -1690,6 +1690,26 @@ def sample_results():
     ]
 
 
+def post_report(cfg, results, attempts=5, delay=5):
+    """POST job results back to the brain, retrying briefly. Covers the
+    self-update race: a job can target the brain's OWN container, whose reboot
+    step already confirmed it's back (pct exec true) but whose web server can
+    take a few more seconds to start listening. http() has no retry, so a
+    report landing in that gap used to crash main() and lose last_run -- the
+    brain would see the guest as still "due" and update+reboot it again next
+    tick. Returns True/False so the caller can decide whether to still notify."""
+    for attempt in range(attempts):
+        try:
+            http(cfg, "/report", "POST", {"results": results})
+            return True
+        except Exception as e:  # noqa: BLE001
+            if attempt == attempts - 1:
+                print(f"report post nieudany po {attempt + 1} próbach: {e} "
+                      f"-- last_run nie zapisany, zadanie może się powtórzyć w kolejnym ticku")
+                return False
+            time.sleep(delay)
+
+
 def main():
     cfg = load_cfg()
     post_host_status(cfg)   # always refresh the banner, even with no jobs
@@ -1703,7 +1723,7 @@ def main():
             r["qid"] = j["qid"]
         results.append(r)
     if results:
-        http(cfg, "/report", "POST", {"results": results})
+        post_report(cfg, results)
         # ad-hoc "check" probes are informational glances from the panel, not
         # something worth an email digest entry
         maybe_notify(cfg, [r for r in results if r.get("kind") != "check"])
