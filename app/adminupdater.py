@@ -151,11 +151,22 @@ def compute_plan():
     # prune blind) while a populated one missing a vmid means "genuinely gone".
     known = inv.get("guests") or {}
     if known:
-        gone = [v for v in cfg.get("guests", {}) if str(v) not in known]
+        guests = cfg.setdefault("guests", {})
+        gone = [v for v in guests if str(v) not in known]
         for v in gone:
             core.log(f"guest {v}: nie istnieje już na hoście — usuwam zapisaną politykę")
-            del cfg["guests"][v]
-        if gone:
+            del guests[v]
+
+        # GUARD 0b: a guest seen by a real scan but with no saved policy is brand
+        # new (created straight in Proxmox, never through this panel). Auto-enroll
+        # it on the default schedule instead of leaving it silently unmanaged until
+        # someone opens the wizard.
+        new = [v for v in known if v not in guests]
+        for v in new:
+            core.log(f"guest {v}: nowa maszyna — dodaję do harmonogramu aktualizacji")
+            guests[v] = dict(GUEST_DEFAULTS, enabled=True)
+
+        if gone or new:
             core.save_config(cfg)
 
     jobs = []
@@ -167,15 +178,13 @@ def compute_plan():
         # (security patches, then app recipe, then health-check) under one
         # rollback point. Its own clock: last_run.
         due = g["enabled"] and core.is_due(g, st.get("last_run", 0), now)
-        # GUARD 2: don't auto-update a guest without a fresh backup. Default window is
-        # 72h, not 24h: a backup job that skips weekends (common for a Mon-Fri PBS job)
-        # can legitimately leave a guest's newest copy 2-3 days old without anything
-        # actually being broken. User-tunable via Settings -> backup_fresh_hours.
-        no_backup = (due and sett.get("require_backup", True)
-                     and not guest_backup_fresh(vmid, inv, int(sett.get("backup_fresh_hours", 72)), now))
-        if no_backup:
-            core.log(f"guest {vmid}: brak świeżej kopii — auto-update wstrzymany (require_backup)")
-        if due and not no_backup:
+        # A missing/stale external backup is informational only -- the update's own
+        # pre_snapshot is the real rollback point, so a guest is never skipped for
+        # it (was a hard block until 2026-08-12; the panel still flags it via
+        # guest_view()'s "no_backup").
+        if due and not guest_backup_fresh(vmid, inv, int(sett.get("backup_fresh_hours", 72)), now):
+            core.log(f"guest {vmid}: brak świeżej kopii — aktualizuję mimo to (preupd snapshot ją zastępuje)")
+        if due:
             job = build_update_job(g, vmid, sett)
             if job:
                 jobs.append(job)
@@ -344,9 +353,20 @@ def set_inventory(data):
     # that timed out (pvesm/pct) can come back with zero guests; if we already
     # hold real data, keep it — otherwise propose_schedule would see 0 fresh
     # guests and a fallback window, and could plan into a real backup slot.
+    # Same backstop for a PARTIAL scan: a loaded host can return a handful of
+    # guests instead of none (incident 2026-08-09: 3 of 18 posted, passed the
+    # host's scan_ok() since it only checks for non-empty). GUARD 0 in
+    # compute_plan() trusts this data as ground truth and prunes any saved
+    # policy missing from it, so a partial scan silently wiped out real
+    # schedules for every guest that scan happened to miss. Reject anything
+    # that lost more than half the last known-good fleet.
     data = dict(data or {})
-    if not data.get("guests"):
-        if get_inventory().get("guests"):
+    new = data.get("guests") or {}
+    prev = get_inventory().get("guests") or {}
+    if prev and len(new) < len(prev) / 2:
+        return {"ok": False, "kept": True}
+    if not new:
+        if prev:
             return {"ok": False, "kept": True}
     state = core.load_state()
     state[INVENTORY_KEY] = data
@@ -939,7 +959,7 @@ def guest_view():
         inv_g = (inv.get("guests") or {}).get(vmid, {})
         fresh = guest_backup_fresh(vmid, inv, fresh_h, now)
         g = guest_settings(cfg, vmid)
-        blocked = bool(g["enabled"] and sett.get("require_backup", True) and not fresh)
+        no_backup = bool(g["enabled"] and not fresh)
         distro = (st.get("last") or {}).get("distro")
         out.append({"vmid": int(vmid), "name": meta["name"], "status": meta["status"],
                     "gtype": meta.get("type", "lxc"),
@@ -951,7 +971,7 @@ def guest_view():
                     "backup": {"info": inv_g.get("backup"), "fresh": fresh},
                     "snapshots": inv_g.get("snapshots"),
                     "agent_ok": inv_g.get("agent_ok"),
-                    "blocked_no_backup": blocked})
+                    "no_backup": no_backup})
     return {"settings": sett, "guests": out, "pve_ok": pve_ok,
             "host": state.get(HOST_KEY), "host_update": host_update_settings(cfg),
             "notify": notify_settings(cfg), "extra_forbidden": cfg.get("extra_forbidden") or {},
