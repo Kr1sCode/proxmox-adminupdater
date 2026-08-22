@@ -187,26 +187,51 @@ class QemuDriver:
         return self.agent_ready()
 
     def exec(self, argv, timeout):
-        # `qm guest exec` is synchronous by default (--synchronous 1): it blocks and
-        # returns the guest's exit code + output as JSON in one call. Give the
-        # subprocess itself a little headroom over --timeout so qm gets to return
-        # its own timeout message instead of us hard-killing it mid-response.
-        rc, out = run(["qm", "guest", "exec", self.id, "--timeout", str(timeout),
-                       "--", *argv], timeout + 30)
+        # Launch async (--synchronous 0): a single fast QMP call that just hands back
+        # a pid, then we poll exec-status ourselves. `qm`'s own --synchronous 1 wait
+        # does the same polling internally over ONE QMP call with its own short,
+        # non-configurable timeout -- observed in practice ("qga command
+        # 'guest-exec-status' failed - got timeout") when the guest is busy (e.g. a
+        # Windows Update install saturating CPU/disk), even though the launched
+        # process is still running fine in the guest. Polling it ourselves means one
+        # flaky query gets retried instead of failing the whole job on a false alarm.
+        rc, out = run(["qm", "guest", "exec", self.id, "--synchronous", "0",
+                       "--", *argv], 30)
         if rc != 0:
             return 1, (out.strip() or f"qm guest exec nieudany (rc={rc})")
         try:
-            data = json.loads(out)
-        except ValueError:
-            return 1, out
-        if not data.get("exited"):
-            return 124, "guest agent nie zwrócił wyniku w czasie (timeout)"
-        out_data = data.get("out-data") or ""
-        err_data = data.get("err-data") or ""
-        exitcode = int(data.get("exitcode", 1) or 0)
-        if err_data.startswith("#< CLIXML") and exitcode == 0:
-            err_data = ""   # PowerShell progress-stream noise on success, not a real error
-        return exitcode, _strip_ansi(out_data + err_data)
+            pid = json.loads(out)["pid"]
+        except (ValueError, KeyError):
+            return 1, out or "qm guest exec: brak pid w odpowiedzi"
+
+        deadline = time.monotonic() + timeout
+        misses = 0
+        while time.monotonic() < deadline:
+            rc, out = run(["qm", "guest", "exec-status", self.id, str(pid)], 35)
+            if rc != 0:
+                # a single QMP status query can time out under guest load without the
+                # launched command itself having failed -- retry a few times before
+                # concluding we've genuinely lost the guest agent.
+                misses += 1
+                if misses >= 3:
+                    reason = out.strip() or "brak odpowiedzi"
+                    return 124, f"guest agent nie odpowiedział na zapytanie o status 3x ({reason})"
+                time.sleep(5)
+                continue
+            misses = 0
+            try:
+                data = json.loads(out)
+            except ValueError:
+                return 1, out
+            if data.get("exited"):
+                out_data = data.get("out-data") or ""
+                err_data = data.get("err-data") or ""
+                exitcode = int(data.get("exitcode", 1) or 0)
+                if err_data.startswith("#< CLIXML") and exitcode == 0:
+                    err_data = ""   # PowerShell progress-stream noise on success, not a real error
+                return exitcode, _strip_ansi(out_data + err_data)
+            time.sleep(5)
+        return 124, "guest agent nie zwrócił wyniku w czasie (timeout)"
 
     def snapshot(self, name, description):
         # --vmstate 0: disk-only, no RAM dump -- fast, matches pct snapshot's semantics
@@ -690,6 +715,17 @@ def _rollback_verdict(snap, job, driver, timeout):
     return "failed"
 
 
+def _step_verdict(rc, snap, job, driver, timeout):
+    # rc==124 means we lost confirmation (the guest agent stopped answering our
+    # polling), NOT that the command itself came back with a failure -- the guest-side
+    # process launched via guest-exec runs detached and may well have finished fine.
+    # Rolling back here could silently discard a successful install, so leave the
+    # guest alone and surface it as "unconfirmed" for a human to check instead.
+    if rc == 124:
+        return "unconfirmed"
+    return _rollback_verdict(snap, job, driver, timeout)
+
+
 def do_host_update(cfg, job):
     """Update the PVE host itself. In the default mode the plan only carries a
     scope enum (safe|full) -- the host still composes the real command from its
@@ -900,10 +936,10 @@ def do_job(cfg, job):
                                      "log": f"brak obsługi ({distro}) / recepty"})
                 continue
             rc, out = driver.exec(cmd, cfg["timeout"])
-            res["steps"].append({**step, "status": ("ok" if rc == 0 else "failed"),
-                                 "rc": rc, "log": out[-2000:]})
+            status = "ok" if rc == 0 else ("unconfirmed" if rc == 124 else "failed")
+            res["steps"].append({**step, "status": status, "rc": rc, "log": out[-2000:]})
             if rc != 0:
-                res["status"] = _rollback_verdict(snap, job, driver, cfg["timeout"])
+                res["status"] = _step_verdict(rc, snap, job, driver, cfg["timeout"])
                 return res  # stop the chain; the snapshot is the safety net
 
         # 4) optional post-update reboot — the guest has to opt in, and then either the
@@ -939,10 +975,10 @@ def do_job(cfg, job):
                     break
                 time.sleep(10)
             res["steps"].append({"action": "health-check",
-                                 "status": ("ok" if rc == 0 else "failed"),
+                                 "status": ("ok" if rc == 0 else ("unconfirmed" if rc == 124 else "failed")),
                                  "rc": rc, "log": out[-2000:]})
             if rc != 0:
-                overall = _rollback_verdict(snap, job, driver, cfg["timeout"])
+                overall = _step_verdict(rc, snap, job, driver, cfg["timeout"])
 
         # 6) post-update verification -- did it actually finish, not just "did the
         # guest come back"? Re-runs the SAME read-only probe as the panel's "check"
@@ -987,7 +1023,7 @@ GOOD = ("ok", "skipped", "dryrun")
 
 def _color(s):
     return {"ok": "#16a34a", "dryrun": "#0891b2", "skipped": "#64748b",
-            "low-disk": "#d97706"}.get(s, "#dc2626")
+            "low-disk": "#d97706", "unconfirmed": "#d97706"}.get(s, "#dc2626")
 
 
 def rc_hint(rc):
@@ -1010,8 +1046,12 @@ def rc_hint(rc):
               "przerwał pracę. Zwiększ zasoby kontenera (RAM/rdzenie).",
               "container is under-provisioned for the update (too little RAM/CPU) and the "
               "updater aborted itself. Raise the container's resources (RAM/cores)."),
-        124: ("przekroczono limit czasu — aktualizacja trwała za długo i została przerwana.",
-              "timed out — the update ran too long and was stopped."),
+        124: ("guest agent przestał odpowiadać na zapytania o status — działanie mogło mimo to "
+              "zakończyć się poprawnie w gościu (nic nie zostało wycofane). Sprawdź ręcznie "
+              "przyciskiem „sprawdź zaległe aktualizacje”.",
+              "the guest agent stopped answering status queries — the action may still have "
+              "completed fine inside the guest (nothing was rolled back). Verify manually with "
+              "the “check pending updates” button."),
         100: ("błąd menedżera pakietów (apt/dpkg) — sprawdź źródła pakietów i blokady dpkg.",
               "package-manager error (apt/dpkg) — check the package sources and dpkg locks."),
         126: ("polecenia nie można było wykonać (uprawnienia).",
