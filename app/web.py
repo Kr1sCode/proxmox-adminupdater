@@ -229,6 +229,18 @@ def api_guest_save(vmid):
                     "window": {**win, "start": fmt(win["start_min"]),
                                "end": fmt(win["end_min"])},
                 }), 409
+    # Second guard: another enabled guest already owns this exact (weekday, HH:MM).
+    # The executor runs jobs serially so it is not fatal -- warn, allow force.
+    if g.get("enabled") and g.get("mode") == "calendar" and not body.get("force"):
+        for t in (g.get("times") or []):
+            mn = up._hhmm(t)
+            if mn is None:
+                continue
+            for wd in [int(d) % 7 for d in (g.get("weekdays") or range(7))]:
+                busy = up.guests_at(cfg, wd, mn, skip=vmid)
+                if busy:
+                    return jsonify({"error": "busy", "time": t,
+                                    "weekday": wd, "guests": busy}), 409
     cfg.setdefault("guests", {})[str(vmid)] = g
     core.save_config(cfg)
     _audit(f"CT {vmid} polityka zapisana: enabled={g['enabled']} mode={g['mode']} "

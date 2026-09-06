@@ -753,7 +753,7 @@ const I18N={
     confirmSnap:'Take a snapshot now on CT',confirmUpd:'Run the update now on CT',
     confirmPurge:'Delete ALL managed snapshots (preupd_/auto_) on CT',keepManual:'? Manual snapshots are kept.',
     queuedN:'Queued jobs:',nothingQueued:'Nothing to queue.',
-    collideMsg:'falls inside the backup window',forceQ:'Save anyway?',
+    collideMsg:'falls inside the backup window',busyMsg:'is already taken by another guest',forceQ:'Save anyway?',
     maintTitle:'Maintenance window & schedule',maintNote:'Places enrolled containers into spaced slots inside the window, skipping every detected backup window and the host-update slot.',
     winStart:'Window start (HH:MM)',winEnd:'Window end (HH:MM)',maintDay:'Day (0=Mon…6=Sun)',maintDays:'Nights of the week (fleet spread across them)',spacing:'Spacing (min)',concurrency:'Max concurrent / night',
     spacingMode:'Update pacing',spacingFixed:'Fixed spacing per guest',spacingCascade:'Cascade — one after another, back to back',
@@ -873,7 +873,7 @@ const I18N={
     confirmSnap:'Zrobić migawkę teraz na CT',confirmUpd:'Uruchomić aktualizację teraz na CT',
     confirmPurge:'Usunąć WSZYSTKIE zarządzane migawki (preupd_/auto_) na CT',keepManual:'? Ręczne migawki pozostają.',
     queuedN:'Zakolejkowano zadań:',nothingQueued:'Nic do zakolejkowania.',
-    collideMsg:'wpada w okno backupu',forceQ:'Zapisać mimo to?',
+    collideMsg:'wpada w okno backupu',busyMsg:'jest już zajęta przez inną maszynę',forceQ:'Zapisać mimo to?',
     maintTitle:'Okno serwisowe i harmonogram',maintNote:'Rozmieszcza włączone kontenery w odstępach wewnątrz okna, omijając każde wykryte okno backupu i slot aktualizacji hosta.',
     winStart:'Początek okna (HH:MM)',winEnd:'Koniec okna (HH:MM)',maintDay:'Dzień (0=Pn…6=Nd)',maintDays:'Noce tygodnia (flota rozłożona po nich)',spacing:'Odstęp (min)',concurrency:'Maks. równoległych / noc',
     spacingMode:'Tryb rozstawiania aktualizacji',spacingFixed:'Stały odstęp na maszynę',spacingCascade:'Kaskadowo — jedna po drugiej, bez przerwy',
@@ -1531,7 +1531,10 @@ async function save(vmid){
       keep:Math.max(0,+el('sKeep').value||0),max_age_days:Math.max(0,+el('sAge').value||0),dryrun:el('sDry').checked}};
   let res=await fetch('/api/guests/'+vmid,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(res.status===409){const d=await res.json();const w=d.window||{};
-    if(!confirm(`${d.time} ${t('collideMsg')} (${w.start}–${w.end}). ${t('forceQ')}`))return;
+    const msg=d.error==='busy'
+      ?`${d.time} ${t('busyMsg')} (CT ${(d.guests||[]).join(', ')}). ${t('forceQ')}`
+      :`${d.time} ${t('collideMsg')} (${w.start}–${w.end}). ${t('forceQ')}`;
+    if(!confirm(msg))return;
     body.force=true;res=await fetch('/api/guests/'+vmid,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});}
   el('dlg').close();load();
 }
