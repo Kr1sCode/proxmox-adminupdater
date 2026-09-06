@@ -64,10 +64,35 @@ def test_gone_guest_pruned():
     assert "999" not in cfg["guests"]
 
 
+def test_backup_window_crossing_midnight_covers_next_day():
+    """2026-09-06: the Saturday 23:00 backup ran until 05:08, but the window was
+    tagged days=[Sat] only, so the Sunday-03:30 guests saw no collision."""
+    inv = {"windows": [{"job": "sat", "start_min": 1380, "end_min": 313, "days": [5]}]}
+    cfg = core.load_config()
+    assert up.time_in_backup_window(cfg, "03:30", inv, weekdays=[6]) is not None
+    assert up.time_in_backup_window(cfg, "03:30", inv, weekdays=[2]) is None
+    assert up.forbidden_zones(cfg, inv, 6) == [(1380, 313)]
+
+
+def test_auto_enroll_uses_free_slots():
+    cfg = core.load_config()
+    cfg["guests"] = {}
+    cfg["maintenance"] = {"window_start": "01:30", "window_end": "05:00",
+                          "days": [0, 6], "spacing_min": 20}
+    core.save_config(cfg)
+    up.compute_plan()
+    cfg = core.load_config()
+    slots = [(g["weekdays"][0], g["times"][0]) for g in cfg["guests"].values()]
+    assert len(slots) >= 19
+    assert len(set(slots)) == len(slots), f"auto-enroll stacked guests: {sorted(slots)}"
+
+
 if __name__ == "__main__":
     test_partial_scan_rejected()
     test_empty_scan_rejected()
     test_growing_scan_accepted()
     test_new_guest_auto_enrolled_and_backup_never_blocks()
     test_gone_guest_pruned()
+    test_backup_window_crossing_midnight_covers_next_day()
+    test_auto_enroll_uses_free_slots()
     print("OK")

@@ -7,6 +7,7 @@ Run: python3 host/test_proxmox_adminupdater_exec.py"""
 import importlib.util
 import os
 import sys
+import time
 
 spec = importlib.util.spec_from_file_location(
     "adminupdater_exec",
@@ -115,6 +116,17 @@ def test_step_verdict_real_failure_still_rolls_back():
     assert verdict == "rolled-back"
 
 
+def test_long_backup_learns_capped_window():
+    """A 558-min Saturday run must learn an 8h window, not fall back to 3h: the
+    old `smin + 180` made a LONGER backup produce a SHORTER window, and the 03:30
+    jobs walked into a still-running vzdump ("VM is locked (backup)")."""
+    st = int(time.mktime((2026, 8, 29, 23, 0, 0, 0, 0, -1)))   # a Saturday
+    exe._node_name = lambda: "node"
+    exe._recent_vzdump_tasks = lambda node: [{"starttime": st, "endtime": st + 558 * 60}]
+    w = exe.learn_windows([{"id": "sat", "schedule": "sat 23:00"}])
+    assert w["sat"] == (1380, (1380 + 480) % 1440), w          # 23:00 -> 07:00
+
+
 if __name__ == "__main__":
     test_retries_then_succeeds()
     test_gives_up_after_max_attempts()
@@ -124,4 +136,5 @@ if __name__ == "__main__":
     test_qemu_exec_launch_failure_is_a_real_failure()
     test_step_verdict_124_is_unconfirmed_and_never_rolls_back()
     test_step_verdict_real_failure_still_rolls_back()
+    test_long_backup_learns_capped_window()
     print("OK")

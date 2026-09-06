@@ -1616,8 +1616,12 @@ def learn_windows(jobs):
                 continue
             et = time.localtime(int(t["endtime"]))
             end = (et.tm_hour * 60 + et.tm_min + 5) % 1440     # +5 min tail margin
-            if (end - smin) % 1440 > 480:                      # sanity guard: cap at 8h
-                end = (smin + 180) % 1440
+            # Sanity CAP, never a shrink: a run longer than 8h is treated as 8h.
+            # (Was `smin + 180`, which made a LONGER backup produce a SHORTER
+            # window -- a 558-min Saturday run learned 23:00-02:00, so the
+            # 03:30 jobs started mid-backup and hit "VM is locked (backup)".)
+            if (end - smin) % 1440 > 480:
+                end = (smin + 480) % 1440
             learned[j["id"]] = (smin, end)
             break
     return learned

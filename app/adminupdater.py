@@ -163,8 +163,10 @@ def compute_plan():
         # someone opens the wizard.
         new = [v for v in known if v not in guests]
         for v in new:
-            core.log(f"guest {v}: nowa maszyna — dodaję do harmonogramu aktualizacji")
-            guests[v] = dict(GUEST_DEFAULTS, enabled=True)
+            wd, tm = free_slot(cfg, inv)     # a free slot, not the fixed default minute
+            core.log(f"guest {v}: nowa maszyna — dodaję do harmonogramu aktualizacji "
+                     f"(dzień {wd}, {tm})")
+            guests[v] = dict(GUEST_DEFAULTS, enabled=True, weekdays=[wd], times=[tm])
 
         if gone or new:
             core.save_config(cfg)
@@ -572,6 +574,20 @@ def _in_zone(minute, zones):
     return None
 
 
+def _window_days(w):
+    """Weekdays a backup window actually OCCUPIES. A window carries the weekday it
+    STARTS on, but one that crosses midnight (Sat 23:00 -> Sun 05:13) also occupies
+    the next day -- without this, a guest scheduled Sunday 03:30 saw "we never share
+    a night" and ran straight into the still-running Saturday backup."""
+    wd = w.get("days")
+    if wd is None:
+        return None                               # every day
+    days = {int(d) % 7 for d in wd}
+    if int(w.get("end_min", 0)) <= int(w.get("start_min", 0)):
+        days |= {(d + 1) % 7 for d in days}
+    return days
+
+
 def forbidden_zones(cfg, inv, weekday=None):
     """Hard zones for a given weekday: each detected backup window that runs that day
     (windows carry their own 'days'; None = every day) + host-maintenance zones the
@@ -579,8 +595,8 @@ def forbidden_zones(cfg, inv, weekday=None):
     used by the manual-entry guard). Day-specific host jobs are added by day_zones()."""
     zones = []
     for w in inv.get("windows", []):
-        wd = w.get("days")
-        if weekday is not None and wd is not None and weekday not in wd:
+        wd = _window_days(w)
+        if weekday is not None and wd is not None and weekday % 7 not in wd:
             continue                              # this backup runs on other days only
         zones.append((int(w["start_min"]), int(w["end_min"])))
     for z in (cfg.get("extra_forbidden") or {}).values():
@@ -644,13 +660,61 @@ def time_in_backup_window(cfg, hhmm, inv=None, weekdays=None):
         return None
     gwd = {int(d) % 7 for d in (weekdays or [])}
     for w in inv.get("windows", []):
-        wwd = w.get("days")
-        if gwd and wwd is not None and not (gwd & {int(d) % 7 for d in wwd}):
+        wwd = _window_days(w)             # includes the day a window bleeds into
+        if gwd and wwd is not None and not (gwd & wwd):
             continue                      # they never share a night
         s, e = int(w["start_min"]), int(w["end_min"])
         if ((s <= m < e) if s <= e else (m >= s or m < e)):
             return w
     return None
+
+
+def guests_at(cfg, weekday, minute, skip=None):
+    """vmids whose enabled calendar schedule already occupies this (weekday, minute)."""
+    out = []
+    for vmid in (cfg.get("guests") or {}):
+        if skip is not None and str(vmid) == str(skip):
+            continue
+        g = guest_settings(cfg, vmid)
+        if not g.get("enabled") or g.get("mode") != "calendar":
+            continue
+        if weekday % 7 not in {int(d) % 7 for d in (g.get("weekdays") or range(7))}:
+            continue
+        if any(_hhmm(t) == minute for t in (g.get("times") or [])):
+            out.append(int(vmid))
+    return sorted(out)
+
+
+def free_slot(cfg, inv=None):
+    """First (weekday, "HH:MM") inside the maintenance window that no other enabled
+    guest occupies and no backup window covers. Auto-enroll used to hand every new
+    guest the fixed GUEST_DEFAULTS slot (Sunday 03:30), so a fleet grown straight in
+    Proxmox piled machines onto one minute."""
+    m = maintenance_settings(cfg)
+    ws, we = _hhmm(m["window_start"]), _hhmm(m["window_end"])
+    if ws is None or we is None:
+        ws, we = 90, 300
+    step = max(1, int(m["spacing_min"]))
+    span = (we - ws) % 1440 or 1440
+    days = m["days"] or [6]
+    least = None                         # emptiest slot seen, for the overflow case
+    for off in range(0, span, step):     # fill the same slot on every night, then move on
+        minute = (ws + off) % 1440
+        hhmm = f"{minute // 60:02d}:{minute % 60:02d}"
+        for d in days:
+            wd = (int(d) + (1 if ws + off >= 1440 else 0)) % 7   # slot past midnight
+            if time_in_backup_window(cfg, hhmm, inv, weekdays=[wd]):
+                continue
+            occupied = len(guests_at(cfg, wd, minute))
+            if not occupied:
+                return wd, hhmm
+            if least is None or occupied < least[0]:
+                least = (occupied, wd, hhmm)
+    # more guests than slots (nights x spacing): share the emptiest slot rather than
+    # stacking every overflow guest onto the first minute of the window
+    if least:
+        return least[1], least[2]
+    return int(days[0]) % 7, f"{ws // 60:02d}:{ws % 60:02d}"
 
 
 _KERNEL_RX = re.compile(r"^(linux-image|linux-headers|linux-modules|linux-generic|kernel)[-\s]", re.I)
