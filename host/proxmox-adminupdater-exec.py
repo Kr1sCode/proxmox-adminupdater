@@ -1414,7 +1414,10 @@ def backup_coverage(storages):
             if len(c) < 2 or "backup" not in c[0]:
                 continue
             volid, vmid = c[0], c[-1]
-            m = re.search(r"(\d{4})[-_](\d\d)[-_](\d\d)[T_](\d\d)[:_](\d\d)[:_](\d\d)", volid)
+            # local vzdump volids use a HYPHEN between date and time
+            # (vzdump-lxc-104-2026_11_08-07_00_03.tar.zst), PBS snapshots use "T";
+            # both separators must be accepted here.
+            m = re.search(r"(\d{4})[-_](\d\d)[-_](\d\d)[T_-](\d\d)[:_](\d\d)[:_](\d\d)", volid)
             if not m:
                 continue
             ts = "{}-{}-{} {}:{}:{}".format(*m.groups())
